@@ -1,0 +1,24 @@
+---
+title: "Homweork 01"
+author: "Spencer Pease"
+date: "4/6/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(knitr.kable.NA = '-')
+
+# Load libraries
+library(dplyr)
+library(ggplot2)
+
+```
+
+# _Q1_
+# _Q2_
+# _Q3_
+# _Q4_
+# _Q5_
+# _Q6_
+# _Q7_
