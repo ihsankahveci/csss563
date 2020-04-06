@@ -17,3 +17,11 @@ population, fertility, mortality and migration. This course covers:
    population
  * Reconstructing population and vital rates from imperfect data.
  * Data science for demography.
+
+
+## Assignments
+
+ * Homework 1: ([link][1])
+
+
+[1]: homework/hw01/
