@@ -1,8 +1,13 @@
 ---
-title: "Homweork 01"
+title: "Homework 01"
 author: "Spencer Pease"
 date: "4/6/2020"
-output: pdf_document
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: true
 ---
 
 ```{r setup, include=FALSE}
