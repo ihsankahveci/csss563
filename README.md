@@ -22,6 +22,8 @@ population, fertility, mortality and migration. This course covers:
 ## Assignments
 
  * Homework 1: ([link][1])
+ * Homework 2: ([link][2])
 
 
 [1]: homework/hw01/
+[2]: homework/hw02/
