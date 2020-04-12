@@ -47,7 +47,47 @@ library(wpp2019)
 ### _Q1.i_
 
 ## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+data(mxF)
+thailand_mx <- mxF %>%
+  filter(name == "Thailand") %>%
+  select(age, Raw = `2015-2020`) %>%
+  mutate(`Log-Transformed` = log(Raw)) %>%
+  pivot_longer(-age, names_to = "scale", values_to = "mx")
+
+```
+
+
 ### _Q2.a_
+
+```{r, fig.dim=c(7, 6)}
+
+# Question 2a -------------------------------------------------------------
+
+thailand_mx_plot <- ggplot(thailand_mx, aes(x = age, y = mx)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(vars(scale), nrow = 2, scales = "free_y") +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Age-Specific Mortality Rates",
+    subtitle = "Thailand, Females, 2015-2020",
+    caption = "Source: WPP2019",
+    x = "Age (years)",
+    y = "Mortality Rate (mx and log(mx))"
+  )
+
+thailand_mx_plot
+
+```
+
+One unusual feature is...
+
 ### _Q2.b_
 ### _Q2.c_
 
