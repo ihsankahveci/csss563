@@ -29,6 +29,7 @@ rm(gr)
 # Load libraries
 library(dplyr)
 library(tidyr)
+library(magrittr)
 library(ggplot2)
 library(wpp2019)
 
@@ -42,12 +43,27 @@ write_matex <- function(x, digits = 3) {
 }
 
 "%^%" <- function(A, n) {
-  # From: https://r.789695.n4.nabble.com/A-function-for-raising-a-matrix-to-a-power-td824525.html
   if (n == 1) {
     A
   } else {
     A %*% (A %^% (n - 1))
   }
+}
+
+make_leslie_matrix <- function(f, s) {
+
+  if (length(f) != length(s)) {
+    stop("f and s must be the same length")
+  }
+
+  n_size <- length(f)
+  l_mat <- matrix(0, nrow = n_size, ncol = n_size)
+
+  l_mat[1, ] <- f
+  diag(l_mat[-1, ]) <- s[1:(n_size - 1)]
+  l_mat[n_size, n_size] <- s[n_size]
+
+  l_mat
 }
 
 ```
@@ -66,18 +82,16 @@ pop_table <- tibble(
   surv = c(.65, .75, .15)
 )
 
-pop_table_cols <- c(
-  "Age",
-  "Population ($N_x$)",
-  "Fertility Rate ($\\tilde{F}_x$)",
-  "Survival Prob. ($s_x$)"
-)
-
 knitr::kable(
   pop_table,
   booktabs = TRUE,
   caption = "Q1 one-sex closed population",
-  col.names = pop_table_cols,
+  col.names = c(
+    "Age",
+    "Population ($N_x$)",
+    "Fertility Rate ($\\tilde{F}_x$)",
+    "Survival Prob. ($s_x$)"
+  ),
   eval = FALSE
 )
 
@@ -90,14 +104,25 @@ knitr::kable(
 
 # Question 1a -------------------------------------------------------------
 
-births <- pop_table %>%
+CBR <- pop_table %>%
   mutate(
-    births = pop * fr * surv,
+    births = pop * fr,
     person_years = pop * surv
   ) %>%
-  pull(births) %>% sum()
+  summarise(cbr = sum(births) / sum(person_years))
 
 ```
+
+The crude birth rate ($CBR$) is defined as the number of births over the
+person-years lived in the period $[T_1, T_2]$. Since our period is a single
+year, we can calculate $CBR$ as:
+
+$$
+CBR = \sum\frac{N_x \tilde{F}_x}{N_xs_x}
+$$
+
+where we sum over all age groups. The crude birth rate for this population in
+the next time period is then **`r round(CBR[[1,1]], 3)`**.
 
 
 ### _Q1.b_
@@ -106,8 +131,18 @@ births <- pop_table %>%
 
 # Question 2b -------------------------------------------------------------
 
-TFR <- sum(pop_table$fr)
-tfr_eqn <- paste0(pop_table$fr, collapse = " + ")
+f_tilde_2_asfr <- function(F_tilde, srb, Sxm1, Nxm1, Nx, q0) {
+  F_tilde * (1 + srb) * 2/(1 + Sxm1 * (Nxm1/Nx)) / (1 - q0/2)
+}
+
+pop_asfr_1 <- 0
+pop_asfr_2 <- f_tilde_2_asfr(.9, 1.05, .65, 18000, 17000, 1-.65)
+pop_asfr_3 <- f_tilde_2_asfr(.2, 1.05, .75, 17000, 14000, 1-.65)
+
+pop_asfr <- c(pop_asfr_1, pop_asfr_2, pop_asfr_3)
+
+TFR <- sum(pop_asfr)
+tfr_eqn <- paste0(round(pop_asfr, 3), collapse = " + ")
 
 ```
 
@@ -121,8 +156,18 @@ $$
 \text{TFR}[T_1, T_1 + 1] = \sum {}_{1}F_{x}[T_1, T_1 + 1]
 $$
 
-Taking each age-specific fertility rate, we calculate a total fertility rate of
-$`r tfr_eqn` =$ **`r TFR`** for this population.
+We can convert between $\tilde{F}_x$ and ${}_{1}F_{x}$ using the equation
+
+$$
+\tilde{F}_x = {}_{1}F_{x} \times
+\frac{1}{1 + SRB} \times
+\frac{1}{2}\left( 1 + s_{x-1} \frac{N_{x-1,t}}{N_{x,t}} \right) \times
+\left( 1 - \frac{q_0}{2} \right)
+$$
+
+where we assume $SRB = 1.05$ and take $q_0 = 1 - s_0$. After converting to
+age-specific fertility rates, we calculate a total fertility rate of
+$`r tfr_eqn` =$ **`r round(TFR, 3)`** for this population.
 
 
 ### _Q1.c_
@@ -131,12 +176,7 @@ $`r tfr_eqn` =$ **`r TFR`** for this population.
 
 # Question 1c -------------------------------------------------------------
 
-pop_leslie <- matrix(
-  c(pop_table$fr, c(pop_table$surv[1], 0, 0), c(0, pop_table$surv[2:3])),
-  nrow = 3,
-  ncol = 3,
-  byrow = TRUE
-)
+pop_leslie <- make_leslie_matrix(pop_table$fr, pop_table$surv)
 
 ```
 
@@ -210,6 +250,35 @@ $$
 
 ### _Q1.f_
 
+```{r}
+
+# Question 1f -------------------------------------------------------------
+
+CBR_t10 <- pop_table %>%
+  mutate(
+    pop = as.vector(pop_t10),
+    births = pop * fr,
+    person_years = pop * surv
+  ) %>%
+  summarise(cbr = sum(births) / sum(person_years))
+
+pop_asfr_1_t10 <- 0
+pop_asfr_2_t10 <- f_tilde_2_asfr(.9, 1.05, .65, pop_t10[1], pop_t10[2], 1-.65)
+pop_asfr_3_t10 <- f_tilde_2_asfr(.2, 1.05, .75, pop_t10[2], pop_t10[3], 1-.65)
+
+pop_asfr_t10 <- c(pop_asfr_1_t10, pop_asfr_2_t10, pop_asfr_3_t10)
+
+TFR_t10 <- sum(pop_asfr_t10)
+
+```
+
+The crude birth rate for this population 10 time periods ahead is
+**`r round(CBR_t10[[1,1]], 3)`**.
+
+The total fertility rate 10 time periods ahead, after converting $\tilde{F}_x$
+to ${}_{1}F_{x}$, is **`r round(TFR_t10, 3)`** for this population.
+
+
 ### _Q1.g_
 
 ```{r}
@@ -217,9 +286,9 @@ $$
 # Question 1g -------------------------------------------------------------
 
 pop_right_eigen <- eigen(pop_leslie)
-dominant_index <- which.max(abs(pop_right_eigen$values))
+dominant_right_index <- which.max(abs(pop_right_eigen$values))
 
-pop_iroi <- log(pop_right_eigen$values[dominant_index])
+pop_iroi <- log(pop_right_eigen$values[dominant_right_index])
 
 ```
 
@@ -241,7 +310,7 @@ Leslie matrix, the instantaneous rate of increase is **`r round(pop_iroi, 3)`.**
 
 # Question 1h -------------------------------------------------------------
 
-pop_sad <- matrix(pop_right_eigen$vectors[, dominant_index])
+pop_sad <- matrix(pop_right_eigen$vectors[, dominant_right_index])
 
 ```
 
@@ -260,24 +329,24 @@ $`r write_matex(pop_sad)`$.
 
 # Question 1i -------------------------------------------------------------
 
-pop_repv <- t(pop_sad)
+pop_left_eigen <- eigen(t(pop_leslie))
+dominant_left_index <- which.max(abs(pop_left_eigen$values))
+
+pop_repv <- matrix(pop_left_eigen$vectors[, dominant_left_index])
 
 ```
 
 The reproductive value vector ($v$) is a vector of expected the number of future
 offspring of an individual for each age group. A theorem states that $v$ is
-the dominant left eigenvector of the Leslie matrix for the population. A left
-eigendecomposition for the Leslie matrix is defined as:
+the dominant left eigenvector of the Leslie matrix for the population. The left
+dominant eigenvector of a matrix $A$ is equivalent to the right dominant
+eigenvector of the transpose of matrix, $A^\top$. So, in the formula:
 
-$$ uL = \kappa u $$
-Taking the transpose of this equation yields:
+$$ L^{\top}u = \kappa u $$
 
-$$ L^\top u^\top = \kappa u^\top $$
+the dominant eigenvector $u$ represents the repoductive values. For our Leslie
+matrix, the reproductive value matrix is then $`r write_matex(pop_repv)`$.
 
-which is similar to the right eigendecomposition, except using the transpose of
-the eigenvector. Therefore, the reproductive value vector is the transpose of the
-dominant right eigenvector of the Leslie matrix, or the transpose of the stable
-age distribution: $`r write_matex2(pop_repv)`$.
 
 ## _Q2_
 
@@ -286,50 +355,199 @@ age distribution: $`r write_matex2(pop_repv)`$.
 # Question 2 --------------------------------------------------------------
 
 data(mxF)
+
 thailand_mx <- mxF %>%
   filter(name == "Thailand") %>%
-  select(age, Raw = `2015-2020`) %>%
-  mutate(`Log-Transformed` = log(Raw)) %>%
-  pivot_longer(-age, names_to = "scale", values_to = "mx")
+  select(age, mx = `2015-2020`)
 
 ```
 
 
 ### _Q2.a_
 
-```{r, fig.dim=c(7, 6)}
+```{r,}
 
 # Question 2a -------------------------------------------------------------
 
-thailand_mx_plot <- ggplot(thailand_mx, aes(x = age, y = mx)) +
-  geom_point() +
-  geom_line() +
-  facet_wrap(vars(scale), nrow = 2, scales = "free_y") +
-  theme_bw() +
-  theme(text = element_text(family = "serif")) +
-  labs(
-    title = "Age-Specific Mortality Rates",
-    subtitle = "Thailand, Females, 2015-2020",
-    caption = "Source: WPP2019",
-    x = "Age (years)",
-    y = "Mortality Rate (mx and log(mx))"
-  )
+plot_mx <- function(data, x, y) {
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_point() +
+    geom_line() +
+    theme_bw() +
+    theme(text = element_text(family = "serif")) +
+    labs(
+      title = "Age-Specific Mortality Rates",
+      subtitle = "Thailand, Females, 2015-2020",
+      caption = "Source: WPP2019",
+      x = "Age (years)",
+      y = "Mortality Rate"
+    )
+}
 
-thailand_mx_plot
+thailand_mx_plot <- plot_mx(thailand_mx, age, mx)
+thailand_log_mx_plot <- plot_mx(thailand_mx, age, log(mx)) +
+  labs(title = "Age-Specific Log Mortality Rates", y = "Log Mortality Rate")
+
+plot(thailand_mx_plot)
+plot(thailand_log_mx_plot)
 
 ```
 
-One unusual feature is...
+One unusual feature of these mortality rates is the the bump in log-mortality
+around the 15-20 year group. This is a common feature in male populations
+(called the accident hump), but is not as common in female populations. Another
+feature to note is the incredibly high infant mortality rate, which is at the
+same level as older adults.
 
 ### _Q2.b_
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+thailand_l0 <- 100000
+lx = numeric(nrow(thailand_mx))
+lx[1] <- thailand_l0
+n <- c(1, 4, rep(5, 20))
+
+for (i in 2:length(lx)) {
+  lx[i] <- (1 - (1 - exp(-1 * n[i - 1] * thailand_mx$mx[i - 1]))) * lx[i - 1]
+}
+
+thailand_lt <- thailand_mx %>%
+  mutate(
+    age_str =
+      paste0(age, "-", age + 4) %>%
+      inset(c(1, 2, length(age)), c("0", "1-4", "100+")),
+    n = n,
+    qx = 1 - exp(-1 * n * mx),
+    sx = 1 - qx,
+    lx = lx,
+    dx = lx - if_else(!is.na(lead(lx)), lead(lx), 0),
+    ax = n / 2
+  ) %>%
+  select(age, age_str, n, everything())
+
+thailand_lt[["ax"]][1] <- 0.07 + 1.7 * thailand_lt[["mx"]][1]
+thailand_lt[["qx"]][nrow(thailand_lt)] <- 1
+thailand_lt[["sx"]][nrow(thailand_lt)] <- 0
+
+thailand_lt <- thailand_lt %>%
+  mutate(
+    Lx = 5 * if_else(!is.na(lead(lx)), lead(lx), 0) + ax * dx,
+    Tx = rev(cumsum(rev(Lx))),
+    ex = Tx / lx
+  )
+
+```
+
+To derive a life table from the given ${}_{n}M_x$ values, we use the following
+formulas:
+
+$$
+\begin{aligned}
+{}_{n}q_x &= 1 - e^{-n\cdot {}_{n}M_x} \\
+{}_{n}s_x &= 1 - {}_{n}q_x \\
+l_{x+n}   &= (1 - {}_{n}q_{x}) \cdot l_x \\
+{}_{n}d_x &= l_x - l_{x+n} \\
+{}_{n}L_x &= l_{x+n} + a_x \cdot {}_{n}d_x \\
+T_x       &= \sum_{age=x}^\infty {}_{n}L_x \\
+e_x       &= T_x \div L_x
+\end{aligned}
+$$
+
+Where we are using the approximation ${}_{n}q_x = 1 - e^{-n\cdot {}_{n}M_x}$ to
+to get ${}_{n}q_x$ from ${}_{n}M_x$, and $a_x$ is caclulated as $\frac{n}{2}$
+except for the 0-1 age group, where it is $0.07 + 1.7 {}_{1}M_0$.
+
+```{r}
+thailand_lt_names <- c(
+  "Age",
+  "$n$",
+  "$_{5}m_x$",
+  "$_{1}q_x$",
+  "$_{1}s_x$",
+  "$l_x$",
+  "$_{5}d_x$",
+  "$a_x$",
+  "${}_{5}L_x$",
+  "${}_{5}T_x$",
+  "$e_x$"
+)
+
+knitr::kable(
+  select(thailand_lt, -age),
+  booktabs = TRUE,
+  col.names = thailand_lt_names,
+  eval = FALSE,
+  digits = c(0, 1, 3, 3, 3, 0, 0, 2, 0, 0, 2),
+  caption = "Life table for 2015-2020 Thailand female population"
+)
+```
+
+
 ### _Q2.c_
 
+The life expectancy at birth is **`r round(thailand_lt$ex[1], 3)`**, and
+the life expectancy at age 10 is **`r round(thailand_lt$ex[4], 3)`**
+
 ## _Q3_
+
+```{r}
+
+# Question 3 --------------------------------------------------------------
+
+data(tfr)
+data(percentASFR)
+data(sexRatio)
+data(popF)
+data(migration)
+
+```
+
+
 ### _Q3.a_
+
+```{r, warning=FALSE}
+
+# Question 3a -------------------------------------------------------------
+
+thailand_pop <- popF %>% filter(name == "Thailand") %>% select(age, pop = `2015`)
+thailand_srb <- sexRatio %>% filter(name == "Thailand") %>% pull(`2015-2020`)
+thailand_tfr <- tfr %>% filter(name == "Thailand") %>% pull(`2015-2020`)
+
+thailand_fertilty <- percentASFR %>%
+  filter(name == "Thailand") %>%
+  select(age, pasfr = `2015-2020`) %>%
+  mutate(asfr = pasfr * thailand_tfr / 5) %>%
+  right_join(thailand_pop, by = "age") %>%
+  replace_na(list(pasfr = 0, asfr = 0))
+
+```
+
+
+
 ### _Q3.b_
 ### _Q3.c_
 ### _Q3.d_
+
 ### _Q3.e_
+
+```{r}
+
+# Question 3e -------------------------------------------------------------
+
+# Net migration is per 1000 person-years
+thailand_net_mig <- migration %>%
+  filter(name == "Thailand") %>%
+  pull(`2015-2020`)
+
+thailand_mig <- thailand_pop %>%
+  mutate(migrants = (thailand_net_mig / 1000) * pop)
+
+```
+
+
 ### _Q3.f_
 ### _Q3.g_
 
