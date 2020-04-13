@@ -32,19 +32,252 @@ library(tidyr)
 library(ggplot2)
 library(wpp2019)
 
+# Helper functions
+
+write_matex <- function(x, digits = 3) {
+  # From: https://stackoverflow.com/a/54088015/8866058
+  x <- round(x, digits = digits)
+  mat_string <- apply(x, 1, function(y) paste(y, collapse = "&"))
+  paste("\\begin{bmatrix}", paste0(mat_string, collapse = "\\\\"), "\\end{bmatrix}")
+}
+
+"%^%" <- function(A, n) {
+  # From: https://r.789695.n4.nabble.com/A-function-for-raising-a-matrix-to-a-power-td824525.html
+  if (n == 1) {
+    A
+  } else {
+    A %*% (A %^% (n - 1))
+  }
+}
+
 ```
 
 
 ## _Q1_
+
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+pop_table <- tibble(
+  age = c("1", "2", "3+"),
+  pop = c(18, 17, 14) * 1000,
+  fr = c(0, .9, .2),
+  surv = c(.65, .75, .15)
+)
+
+pop_table_cols <- c(
+  "Age",
+  "Population ($N_x$)",
+  "Fertility Rate ($\\tilde{F}_x$)",
+  "Survival Prob. ($s_x$)"
+)
+
+knitr::kable(
+  pop_table,
+  booktabs = TRUE,
+  caption = "Q1 one-sex closed population",
+  col.names = pop_table_cols,
+  eval = FALSE
+)
+
+```
+
+
 ### _Q1.a_
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+births <- pop_table %>%
+  mutate(
+    births = pop * fr * surv,
+    person_years = pop * surv
+  ) %>%
+  pull(births) %>% sum()
+
+```
+
+
 ### _Q1.b_
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+TFR <- sum(pop_table$fr)
+tfr_eqn <- paste0(pop_table$fr, collapse = " + ")
+
+```
+
+
+The total fertility rate in the population in the period $[T_1, T_2]$ is
+defined as the sum of the age-specific fertility rates across all age groups,
+multiplied by the length of the age interval, $n$. With $T_2 - T_1 = n = 1$,
+the total fertility rate represents the single-year cohort total fertility rate:
+
+$$
+\text{TFR}[T_1, T_1 + 1] = \sum {}_{1}F_{x}[T_1, T_1 + 1]
+$$
+
+Taking each age-specific fertility rate, we calculate a total fertility rate of
+$`r tfr_eqn` =$ **`r TFR`** for this population.
+
+
 ### _Q1.c_
+
+```{r}
+
+# Question 1c -------------------------------------------------------------
+
+pop_leslie <- matrix(
+  c(pop_table$fr, c(pop_table$surv[1], 0, 0), c(0, pop_table$surv[2:3])),
+  nrow = 3,
+  ncol = 3,
+  byrow = TRUE
+)
+
+```
+
+The Leslie matrix, $L$, for this population is defined as:
+
+$$
+L =
+\begin{bmatrix}
+\tilde{F}_{A-3} & \tilde{F}_{A-2} & \tilde{F}_{A-1} \\
+s_{A-3}         & 0               & 0 \\
+0               & s_{A-2}         & s_{A-1}
+\end{bmatrix}
+= `r write_matex(pop_leslie)`
+$$
+
+Where $(A-1)+$ is the highest age group that can be reached in this population,
+$3+$, $s_x$ denotes the probability of survival to the next age group for age
+group $x$, and $\tilde{F}_{x}$ is the expected number of female births to a
+woman age $x$, who survives to the next time interval.
+
+
 ### _Q1.d_
+
+```{r}
+
+# Question 1d -------------------------------------------------------------
+
+pop_t0 <- matrix(pop_table$pop)
+pop_t1 <- pop_leslie %*% pop_t0
+
+```
+
+
+We can project this population forward using the _cohort-component method of
+population projection_, which states that the age-specific populations one time
+period ahead ($N_{t+1}$) can be calculated from the matrix multiplication of the
+age-specific population in the current period ($N_t$) and the Leslie matrix
+($L$) of the population. The population by age one period forward from our
+given initial population is then:
+
+$$
+\begin{aligned} N_{t+1} &= L N_t \\
+&= `r write_matex(pop_leslie)` `r write_matex(pop_t0)` \\
+&= `r write_matex(pop_t1)`
+\end{aligned}
+$$
+
+
 ### _Q1.e_
+
+```{r}
+
+# Question 1e -------------------------------------------------------------
+
+pop_t10 <- (pop_leslie %^% 10) %*% pop_t0
+
+```
+
+This method can be extended to projecting age-specific population $k$ periods
+ahead by raising the Leslie matrix to the $k^{\text{th}}$ power ($L^k$). Our
+given population, projected $10$ periods into the future is then:
+
+$$
+\begin{aligned} N_{t+10} &= L^{10} N_t \\
+&= `r write_matex(pop_leslie)`^{10} `r write_matex(pop_t0)` \\
+&= `r write_matex(pop_leslie %^% 10)` `r write_matex(pop_t0)` \\
+&= `r write_matex(pop_t10)`
+\end{aligned}
+$$
+
+
 ### _Q1.f_
+
 ### _Q1.g_
+
+```{r}
+
+# Question 1g -------------------------------------------------------------
+
+pop_right_eigen <- eigen(pop_leslie)
+dominant_index <- which.max(abs(pop_right_eigen$values))
+
+pop_iroi <- log(pop_right_eigen$values[dominant_index])
+
+```
+
+From the theorem that $N_t$ converges to $\lambda^t u$ as $t$ approaches
+infinity, $log(\lambda)$ is the _instantaneous rate of increase of the
+population_. Here, $\lambda$ is defined as the dominant right eigenvalue of the
+Leslie matrix, or for the equation:
+
+$$
+Lv = \lambda v
+$$
+
+it is the eigenvalue $\lambda$ with the largest magnitude. For our calculated
+Leslie matrix, the instantaneous rate of increase is **`r round(pop_iroi, 3)`.**
+
 ### _Q1.h_
+
+```{r}
+
+# Question 1h -------------------------------------------------------------
+
+pop_sad <- matrix(pop_right_eigen$vectors[, dominant_index])
+
+```
+
+Again, from the the formula $\lambda^t u$, $u$ is the _stable age distribution_,
+and is defined as the dominant right eigenvector of the Leslie matrix, which is
+the column vector $v$ from the eigendecomposition of $L$ corresponding to the
+eigenvalue $\lambda$ with the largest magnitude.
+
+For our calculated Leslie matrix, the stable age distribution is
+$`r write_matex(pop_sad)`$.
+
+
 ### _Q1.i_
+
+```{r}
+
+# Question 1i -------------------------------------------------------------
+
+pop_repv <- t(pop_sad)
+
+```
+
+The reproductive value vector ($v$) is a vector of expected the number of future
+offspring of an individual for each age group. A theorem states that $v$ is
+the dominant left eigenvector of the Leslie matrix for the population. A left
+eigendecomposition for the Leslie matrix is defined as:
+
+$$ uL = \kappa u $$
+Taking the transpose of this equation yields:
+
+$$ L^\top u^\top = \kappa u^\top $$
+
+which is similar to the right eigendecomposition, except using the transpose of
+the eigenvector. Therefore, the reproductive value vector is the transpose of the
+dominant right eigenvector of the Leslie matrix, or the transpose of the stable
+age distribution: $`r write_matex2(pop_repv)`$.
 
 ## _Q2_
 
