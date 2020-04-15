@@ -344,7 +344,7 @@ eigenvector of the transpose of matrix, $A^\top$. So, in the formula:
 
 $$ L^{\top}u = \kappa u $$
 
-the dominant eigenvector $u$ represents the repoductive values. For our Leslie
+the dominant eigenvector $u$ represents the reproductive values. For our Leslie
 matrix, the reproductive value matrix is then $`r write_matex(pop_repv)`$.
 
 
@@ -457,7 +457,7 @@ e_x       &= T_x \div L_x
 $$
 
 Where we are using the approximation ${}_{n}q_x = 1 - e^{-n\cdot {}_{n}M_x}$ to
-to get ${}_{n}q_x$ from ${}_{n}M_x$, and $a_x$ is caclulated as $\frac{n}{2}$
+to get ${}_{n}q_x$ from ${}_{n}M_x$, and $a_x$ is calculated as $\frac{n}{2}$
 except for the 0-1 age group, where it is $0.07 + 1.7 {}_{1}M_0$.
 
 ```{r}
@@ -512,6 +512,24 @@ data(migration)
 
 # Question 3a -------------------------------------------------------------
 
+# Collapse 0 and 1-4 age group sx and qx to 0-4 sx and qx
+thailand_mort_0to5 <- thailand_lt %>%
+  select(age, sx) %>%
+  filter(age < 5) %>%
+  summarise(age = "0-4", sx = prod(sx), qx = 1 - prod(sx))
+
+thailand_q0 <- thailand_mort_0to5$qx[1]
+
+# Create standard 5-year age goup sx and qx mortality
+thailand_mort_std <- thailand_lt %>%
+  filter(age >= 5) %>%
+  select(age = age_str, sx, qx) %>%
+  bind_rows(thailand_mort_0to5, .)
+
+asfr_2_f_tilde <- function(asfr, srb, Sxm1, Nxm1, Nx, q0) {
+  asfr * (1 / (1 + srb)) * .5 * (1 + Sxm1 * (Nxm1 / Nx)) * (1 - q0 / 2)
+}
+
 thailand_pop <- popF %>% filter(name == "Thailand") %>% select(age, pop = `2015`)
 thailand_srb <- sexRatio %>% filter(name == "Thailand") %>% pull(`2015-2020`)
 thailand_tfr <- tfr %>% filter(name == "Thailand") %>% pull(`2015-2020`)
@@ -521,15 +539,118 @@ thailand_fertilty <- percentASFR %>%
   select(age, pasfr = `2015-2020`) %>%
   mutate(asfr = pasfr * thailand_tfr / 5) %>%
   right_join(thailand_pop, by = "age") %>%
-  replace_na(list(pasfr = 0, asfr = 0))
+  replace_na(list(pasfr = 0, asfr = 0)) %>%
+  left_join(thailand_mort_std, by = "age") %>%
+  mutate(
+    f_tilde =
+      asfr_2_f_tilde(asfr, thailand_srb, lag(sx), lag(pop), pop, thailand_q0)
+  ) %>%
+  replace_na(list(f_tilde = 0))
 
 ```
 
+To calculate ${}_{5}\tilde{F}_x$, we first use the provided proportional
+age-specific fertility rate and total fertility rate for Thailand in 2015 to get
+age-specific fertility rate with the formula:
+
+$$ \frac{TFR[T_1, T_2] \times {}_{n}PASFR_x}{n} = {}_{n}F_x[T_1, T_2] $$
+
+where $n = 5$ and $[T_1, T_2] = [2015, 2020]$. Then we use the provided
+population and previously calculated mortality rates ${}_{5}s_x$ and ${}_{5}q_0$
+to calculate ${}_{5}\tilde{F}_x$ using the formula:
+
+$$
+{}_{n}\tilde{F}_x = {}_{n}F_x \times
+\frac{1}{1 + SRB} \times
+\frac{1}{2} \left( 1 + {}_{n}s_x \frac{{}_{5}N_{x-1,t}}{{}_{5}N_{x,t}} \right) \times
+\left( 1 - \frac{{}_{n}q_0}{2} \right)
+$$
+
+Note that ${}_{5}q_0$ was calculated as $1 - {}_{5}s_0$, which was in turn
+calculated from ${}_{1}s_0 \times {}_{4}s_1$.
+
+With these calculations, our resulting ${}_{5}\tilde{F}_x$ is:
+
+```{r}
+knitr::kable(
+  select(thailand_fertilty, age, f_tilde, asfr, pop, sx),
+  booktabs = TRUE,
+  col.names =
+    c("Age", "${}_{5}\\tilde{F}_x$", "${}_{5}F_x$", "${}_{5}N_x$", "${}_{5}s_x$"),
+  eval = FALSE,
+  digits = c(0, 3, 3, 0, 3),
+  caption = paste(
+    "Expected number of live female births per woman per five-year period",
+    "in Thailand, 2015-2020"
+  )
+)
+```
 
 
 ### _Q3.b_
+
+```{r}
+
+# Question 3b -------------------------------------------------------------
+
+thailand_leslie <- with(thailand_fertilty, make_leslie_matrix(f_tilde, sx))
+
+thailand_leslie_idx <- which(thailand_leslie != 0, arr.ind = TRUE)
+
+thailand_leslie_tbl <-
+  thailand_leslie_idx %>%
+  as_tibble() %>%
+  mutate(value = thailand_leslie[thailand_leslie_idx]) %>%
+  arrange(row, col)
+
+```
+
+Using our calculated ${}_{5}\tilde{F}_x$ and ${}_{5}s_x$, we can build a Leslie
+matrix for this population:
+
+```{r}
+knitr::kable(
+  thailand_leslie_tbl,
+  booktabs = TRUE,
+  col.names = c("Row", "Column", "Value"),
+  digits = c(0, 0, 3),
+  caption = "Leslie matrix for Thailand females, 2015-2020, (sparse format)"
+)
+```
+
+
 ### _Q3.c_
+
+```{r}
+
+# Question 3c -------------------------------------------------------------
+
+thailand_pop_t1 <- thailand_leslie %*% matrix(thailand_fertilty$pop)
+
+```
+
+Using the given female population in Thailand, 2015-2020 (_table 3_), we can
+calculate the population one 5-year period ahead to 2020, assuming fertility and
+mortality are constant over time, and that there is no migration.
+
+$$ N_{t+1} = LN_{t} = `r write_matex(matrix(thailand_pop_t1), 0)` $$
+
+
 ### _Q3.d_
+
+```{r}
+
+# Question 3d -------------------------------------------------------------
+
+thailand_pop_t3 <- (thailand_leslie %^% 3) %*% matrix(thailand_fertilty$pop)
+
+```
+
+Under the same assumptions as the previous question, we can instead project the
+population 15 years (3 time periods) into the future.
+
+$$ N_{t+3} = L^3N_{t} = `r write_matex(matrix(thailand_pop_t3), 0)` $$
+
 
 ### _Q3.e_
 
@@ -543,14 +664,119 @@ thailand_net_mig <- migration %>%
   pull(`2015-2020`)
 
 thailand_mig <- thailand_pop %>%
-  mutate(migrants = (thailand_net_mig / 1000) * pop)
+  mutate(
+    mig_rate = (thailand_net_mig / 1000) * (pop / sum(pop)),
+    mig_rate_fmt = formatC(mig_rate, digits = 2, format = "e"),
+    mig_num = pop * mig_rate
+  )
 
+```
+
+Under the assumption that the age-specific migration rates follow the same
+distribution as the population distribution, we can calculate age-specific
+migration rates using the provided net migration rate (after converting the rate
+from _migrations per 1,000 person-years_ to _migrant per person-year_).
+
+```{r}
+knitr::kable(
+  select(thailand_mig, age, mig_rate_fmt),
+  booktabs = TRUE,
+  col.names = c("Age", "${}_{5}G_x$"),
+  eval = FALSE,
+  caption = "Age-specific migration rate in Thailand, 205-2020"
+)
 ```
 
 
 ### _Q3.f_
+
+```{r}
+
+# Question 3f -------------------------------------------------------------
+
+thailand_pop_mig_t1 <- `+`(
+  (thailand_leslie %*% matrix(thailand_fertilty$pop)),
+  (.5 * (1 + thailand_leslie)) %*% matrix(thailand_mig$mig_num)
+)
+
+thailand_pop_mig_t3 <- `+`(
+  ((thailand_leslie %^% 3) %*% matrix(thailand_fertilty$pop)),
+  (.5 * (1 + (thailand_leslie %^% 3))) %*% matrix(thailand_mig$mig_num)
+)
+
+thailand_pop_mig_tbl <- tibble(
+  age = thailand_pop$age,
+  mig_pop_2020 = thailand_pop_mig_t1,
+  mig_pop_2030 = thailand_pop_mig_t3
+)
+
+
+```
+
+To incorporate migration into the population projection to 2030, we use the
+assumption that all migration happens half-way through a time interval:
+
+$$
+\begin{aligned}
+N_{t+1} &= LN_t + L^{\frac{1}{2}}G_t \\
+&\approx  LN_t + \frac{1}{2}(I + L)G^t
+\end{aligned}
+$$
+and
+
+$$
+\begin{aligned}
+N_{t+3} &= L^3N_t + L^{\frac{3}{2}}G_t \\
+&\approx  L^3N_t + \frac{1}{2}(I + L^3)G^t
+\end{aligned}
+$$
+where $N$ and $G$ refer to female population and migrants, and $I$ is the
+identity matrix. Using this equation, we calculate the with-migration female
+population in 2020 and 2030:
+
+```{r}
+knitr::kable(
+  mutate_if(thailand_pop_mig_tbl, is.numeric, round),
+  booktabs = TRUE,
+  col.names = c("Age", "2020 Pop.", "2030 Pop."),
+  caption = "Thailand female with-migration population projections"
+)
+```
+
+
 ### _Q3.g_
 
+```{r}
+
+# Question 3g -------------------------------------------------------------
+
+thailand_pop_all_tbl <- thailand_pop_mig_tbl %>%
+  mutate(
+    pop_2020 = thailand_pop_t1,
+    pop_2030 = thailand_pop_t3
+  ) %>%
+  select(age, pop_2020, mig_pop_2020, pop_2030, mig_pop_2030)
+
+```
+
+We can compare our population projections for 2020 and 2030 with migration to
+the same projections without migration:
+
+```{r}
+knitr::kable(
+  mutate_if(thailand_pop_all_tbl, is.numeric, round),
+  booktabs = TRUE,
+  col.names = c("Age", "Pop. 2020", "+Mig. 2020", "Pop. 2030", "+Mig. 2030"),
+  caption = paste(
+    "Comparison of Thailand female population projections for 2020 and 2030,",
+    "with and without migration"
+  )
+)
+```
+
+Here we see that the with-migration projections are always larger than the
+without-migration projections, since Thailand has a net positive migration
+rate in all age groups.
 
 # Appendix
 
