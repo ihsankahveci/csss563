@@ -1,0 +1,63 @@
+---
+title: "Homework 03"
+author: "Spencer Pease"
+date: "4/20/2020"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+# Questions
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+
+# Load libraries
+library(dplyr)
+library(ggplot2)
+library(wpp2019)
+
+# Helper functions
+
+
+```
+
+
+## _Q1_
+### _Q1.a_
+### _Q1.b_
+### _Q1.c_
+### _Q1.d_
+### _Q1.e_
+### _Q1.f_
+
+## _Q2_
+### _Q2.a_
+### _Q2.b_
+### _Q2.c_
+### _Q2.d_
+### _Q2.e_
+
+# Appendix
+
+```{r getlabels, include=FALSE}
+labs <- knitr::all_labels()
+labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
+```
+
+```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
+```
