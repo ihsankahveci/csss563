@@ -28,21 +28,166 @@ rm(gr)
 
 # Load libraries
 library(dplyr)
+library(tidyr)
 library(ggplot2)
 library(wpp2019)
+library(demogR)
+library(MortalityLaws)
 
 # Helper functions
+rmse <- function(x, y) sqrt(mean(log(x - y)^2))
 
+# Load data
+data(mxF)
+tha_mort <- mxF %>%
+  filter(name == "Thailand") %>%
+  select(-country_code, -name) %>%
+  pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
+  extract(period, "year", regex = "(^[:digit:]{4})", convert = TRUE) %>%
+  group_by(year) %>%
+  mutate(n = lead(age) - age) %>%
+  replace_na(list(n = Inf)) %>%
+  mutate(qx = 1 - exp(-1 * n * Mx)) %>%
+  ungroup() %>%
+  select(year, age, n, everything()) %>%
+  arrange(year, age)
 
 ```
 
 
 ## _Q1_
+
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+```
+
 ### _Q1.a_
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+tha_mort_2015 <- tha_mort %>% filter(year == 2015) %>% select(-year)
+
+plot_log_mx <- function(data, ...) {
+
+  ggplot(data, aes(...)) +
+    geom_point() +
+    geom_line() +
+    theme_bw() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom"
+    ) +
+    labs(
+      title = "Age-Specific Log Mortality Rates",
+      subtitle = "Thailand, Females, 2015-2020",
+      x = "Age (years)",
+      y = "Log Mortality Rate",
+      color = "Model"
+    )
+
+}
+
+```
+
+Using the _WPP2019_ package, we can extract the age-specific mortality rates
+for females in Thailand in the period 2015-2020. This data is presented in a
+table and a log-transformed graph below.
+
+```{r}
+knitr::kable(
+  select(tha_mort_2015, -qx),
+  booktabs = TRUE,
+  col.names = c("Age", "n", "${}_{n}M_x$"),
+  caption = "Thailand 2015-2020 female mortality rates",
+  eval = FALSE,
+  digits = 3
+)
+
+```
+
+```{r}
+plot_log_mx(tha_mort_2015, x = age, y = log(Mx))
+```
+
+
 ### _Q1.b_
+
+```{r}
+
+# Question 1b -------------------------------------------------------------
+
+model_gompertz2 <- lm(log(Mx) ~ age, data = filter(tha_mort_2015, age >= 50))
+
+model_gompertz <- with(
+  filter(tha_mort_2015, age >= 50),
+  MortalityLaw(x = age, mx = Mx, law = "gompertz")
+)
+
+model_makeham <- with(
+  filter(tha_mort_2015, age >= 50),
+  MortalityLaw(x = age, mx = Mx, law = "makeham")
+)
+
+coef_gompertz <- coef(model_gompertz)
+coef_makeham <- coef(model_makeham)
+
+```
+
+
 ### _Q1.c_
+
+```{r}
+
+# Question 1c -------------------------------------------------------------
+
+tha_mort_2015_model <- tha_mort_2015 %>%
+  select(-n, -qx, Observed = Mx) %>%
+  mutate(
+    Gompertz = predict(model_gompertz, x = tha_mort_2015$age),
+    Makeham = predict(model_makeham, x = tha_mort_2015$age)
+  ) %>%
+  pivot_longer(-age, names_to = "model", values_to = "Mx")
+
+plot_log_mx(tha_mort_2015_model, x = age, y = log(Mx), color = model)
+
+```
+
 ### _Q1.d_
+
+```{r}
+
+# Question 1d -------------------------------------------------------------
+
+model_HP <- with(tha_mort_2015, MortalityLaw(x = age, mx = Mx, law = "HP"))
+model_HP2 <- with(tha_mort_2015, MortalityLaw(x = age, qx = qx, law = "HP"))
+
+```
+
+
 ### _Q1.e_
+
+```{r}
+
+# Question 1e -------------------------------------------------------------
+
+coaleDemenyLTW <- demogR::cdmltw(sex = "F")
+tha_Mx_0to95 <- tha_mort_2015 %>% filter(age < 100) %>% pull(Mx)
+
+best_match_lt <-
+  coaleDemenyLTW[["nmx"]] %>%
+  apply(1, function(x) rmse(x, log(tha_Mx_0to95))) %>%
+  which.min()
+
+brass_mlt <- coaleDemenyLTW[["nqx"]][best_match_lt, ]
+
+
+```
+
+
 ### _Q1.f_
 
 ## _Q2_
