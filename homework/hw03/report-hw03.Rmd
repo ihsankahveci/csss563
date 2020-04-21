@@ -14,7 +14,7 @@ output:
 
 gr <- 2 / (1 + sqrt(5))
 
-knitr::opts_chunk$set(echo = FALSE, fig.asp = gr)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, fig.asp = gr)
 options(knitr.kable.NA = '-')
 
 rm(gr)
@@ -29,27 +29,27 @@ rm(gr)
 # Load libraries
 library(dplyr)
 library(tidyr)
+library(tibble)
 library(ggplot2)
-library(wpp2019)
-library(demogR)
 library(MortalityLaws)
+library(demogR)
+library(MortCast)
+library(demography)
 
 # Helper functions
-rmse <- function(x, y) sqrt(mean(log(x - y)^2))
+rmse <- function(x, y) sqrt(mean((x - y)^2))
+mx_to_qx <- function(mx, n) 1 - exp(-1 * n * mx)
+qx_to_mx <- function(qx, n) -1 * log(1 - qx) / n
 
 # Load data
-data(mxF)
+data(mxF, package = "wpp2019")
 tha_mort <- mxF %>%
   filter(name == "Thailand") %>%
   select(-country_code, -name) %>%
   pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
   extract(period, "year", regex = "(^[:digit:]{4})", convert = TRUE) %>%
-  group_by(year) %>%
-  mutate(n = lead(age) - age) %>%
-  replace_na(list(n = Inf)) %>%
-  mutate(qx = 1 - exp(-1 * n * Mx)) %>%
-  ungroup() %>%
-  select(year, age, n, everything()) %>%
+  filter(year < 2020) %>%
+  select(year, age, everything()) %>%
   arrange(year, age)
 
 ```
@@ -61,6 +61,12 @@ tha_mort <- mxF %>%
 
 # Question 1 --------------------------------------------------------------
 
+tha_mort_2015 <- tha_mort %>%
+  filter(year == 2015) %>%
+  select(-year) %>%
+  mutate(n = lead(age, default = Inf) - age) %>%
+  mutate(qx = 1 - exp(-1 * n * Mx))
+
 ```
 
 ### _Q1.a_
@@ -69,9 +75,7 @@ tha_mort <- mxF %>%
 
 # Question 1a -------------------------------------------------------------
 
-tha_mort_2015 <- tha_mort %>% filter(year == 2015) %>% select(-year)
-
-plot_log_mx <- function(data, ...) {
+plot_log_mort <- function(data, ...) {
 
   ggplot(data, aes(...)) +
     geom_point() +
@@ -110,7 +114,7 @@ knitr::kable(
 ```
 
 ```{r}
-plot_log_mx(tha_mort_2015, x = age, y = log(Mx))
+plot_log_mort(tha_mort_2015, x = age, y = log(Mx))
 ```
 
 
@@ -137,6 +141,39 @@ coef_makeham <- coef(model_makeham)
 
 ```
 
+Two ways of modeling mortality rates are with the _Gompertz_ model and
+_Gompertz-Makeham_ model. These models estimate force of mortality $\mu(x)$
+using a simple exponential, with the _Gompertz-Makeham_ model including an
+additional constant term. A log-linear fit applied to each of the models,
+defined below, along with the estimated model parameters after fitting our
+observed data:
+
+**Gompertz**
+
+$(\alpha, \beta) =$ (`r round(coef_gompertz, 3)`)
+
+$$
+\begin{aligned}
+\mu(x) &= \alpha e^{\beta x} \\
+log[\mu(x)] &= log(\alpha) + \beta x
+\end{aligned}
+$$
+
+
+**Gompertz-Makeham**
+
+$(\alpha, \beta, \gamma) =$ (`r round(coef_makeham, 4)`)
+
+$$
+\begin{aligned}
+\mu(x) &= \gamma + \alpha e^{\beta x} \\
+log[\mu(x) - \gamma] &= log(\alpha) + \beta x
+\end{aligned}
+$$
+
+_Note: both of these models were fit using the MortalityLaws package, optimizing
+the function $log^2(\frac{est.}{obs.})$._
+
 
 ### _Q1.c_
 
@@ -145,16 +182,26 @@ coef_makeham <- coef(model_makeham)
 # Question 1c -------------------------------------------------------------
 
 tha_mort_2015_model <- tha_mort_2015 %>%
-  select(-n, -qx, Observed = Mx) %>%
+  rename(obs_qx = qx, obs_Mx = Mx) %>%
   mutate(
-    Gompertz = predict(model_gompertz, x = tha_mort_2015$age),
-    Makeham = predict(model_makeham, x = tha_mort_2015$age)
+    Gompertz = predict(model_gompertz, x = age),
+    Makeham = predict(model_makeham, x = age)
   ) %>%
-  pivot_longer(-age, names_to = "model", values_to = "Mx")
+  select(age, n, everything())
 
-plot_log_mx(tha_mort_2015_model, x = age, y = log(Mx), color = model)
+tha_mort_2015_model %>%
+  select(-obs_qx, -n, age, Observed = obs_Mx, everything()) %>%
+  pivot_longer(-age, names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Gompertz", "Makeham")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model)
 
 ```
+
+Plotting both fitted rates against the observed rates, we see that the
+additional constant in the _Gompertz-Makeham_ enables the model to follow the
+observed trends in child and young adult mortality much closer. This presents
+a good case for using _Gompertz-Makeham_ over just _Gompertz_.
+
 
 ### _Q1.d_
 
@@ -162,10 +209,48 @@ plot_log_mx(tha_mort_2015_model, x = age, y = log(Mx), color = model)
 
 # Question 1d -------------------------------------------------------------
 
-model_HP <- with(tha_mort_2015, MortalityLaw(x = age, mx = Mx, law = "HP"))
-model_HP2 <- with(tha_mort_2015, MortalityLaw(x = age, qx = qx, law = "HP"))
+model_HP_mx <- with(tha_mort_2015, MortalityLaw(x = age, mx = Mx, law = "HP"))
+model_HP_qx <- with(tha_mort_2015, MortalityLaw(x = age, qx = qx, law = "HP"))
+
+tha_mort_2015_model <- tha_mort_2015_model %>%
+  mutate(
+    `Heligman-Pollard` = predict(model_HP_mx, x = age),
+    `Heligman-Pollard2` = -1 * log(1 - predict(model_HP_qx, x = age)) / n
+  )
+
+coef_HP <- coef(model_HP_mx)
 
 ```
+
+The _Heligman-Pollard_ model uses three terms to capture child mortality,
+the adult accident bump, and old-age mortality to predict odds of death:
+
+$$
+\frac{q_x}{1 - q_x} = A^{(x+B)^2} + D e^{-E(log(x) - log(F))^2} + GH^x
+$$
+
+Fitting this model with our observed mortality rates, we get the model
+parameters:
+
+(`r paste0(LETTERS[1:8], collapse = ", ")`) =
+`r formatC(coef_HP, format = "g", digits = 3)`
+
+_Note: this model was fit using the MortalityLaws package, optimizing
+the function $log^2(\frac{est.}{obs.})$, and using $M_x$ as an input (internal
+$M_x$ to $q_x$ conversion)._
+
+```{r}
+tha_mort_2015_model %>%
+  select(-obs_qx, -n, age, Observed = obs_Mx, everything()) %>%
+  pivot_longer(-age, names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Heligman-Pollard")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model)
+
+```
+
+This model does a great job of capturing the high child mortality and gets
+closer to capturing the adult accident hump, following the observed data
+closely.
 
 
 ### _Q1.e_
@@ -182,20 +267,495 @@ best_match_lt <-
   apply(1, function(x) rmse(x, log(tha_Mx_0to95))) %>%
   which.min()
 
-brass_mlt <- coaleDemenyLTW[["nqx"]][best_match_lt, ]
+tha_mort_2015_model <- tha_mort_2015_model %>%
+  mutate(
+    obs_qx_95 = obs_qx,
+    standard_qx = c(coaleDemenyLTW[["nqx"]][best_match_lt, ], NA)
+  )
 
+tha_mort_2015_model[["obs_qx_95"]][21:22] <- c(1, NA)
+
+model_brass <- lm(
+  qlogis(obs_qx_95) ~ qlogis(standard_qx),
+  data = filter(tha_mort_2015_model, age < 95)
+)
+
+tha_mort_2015_model <- tha_mort_2015_model %>%
+  mutate(
+    brass_pred_fit_qx = c(plogis(model_brass$fitted.values), 1, NA),
+    brass_pred_obs_qx = plogis(predict(model_brass, data.frame(standard_qx = obs_qx))),
+    brass_pred_fit_mx = -1 * log(1 - brass_pred_fit_qx) / n
+  )
+
+coef_brass <- coef(model_brass)
 
 ```
+
+The _Brass relational model_ estimates mortality given a "standard" reference
+mortality ($q^*(x)$) as an input. This standard mortality comes from the a
+_Coale-Demeny West_ model life table, where the life table that was selected
+was the one with the lowest RMSE compared to our observed mortality (life
+table index #`r best_match_lt`). The model and estimated parameters are shown
+below:
+
+$(\alpha, \beta) =$ `r round(coef_brass, 3)`
+
+$$
+\text{logit}(q_{\alpha, \beta}(x)) = \alpha + \beta \times \text{logit}(q^*(x))
+$$
+
+```{r}
+tha_mort_2015_model %>%
+  select(
+    -n, age, Observed = obs_qx,
+    Brass = brass_pred_fit_qx, Brass2 = brass_pred_obs_qx
+  ) %>%
+  pivot_longer(-age, names_to = "model", values_to = "qx") %>%
+  filter(model %in% c("Observed", "Brass")) %>%
+  plot_log_mort(x = age, y = log(qx), color = model) +
+  labs(
+    title = "Age-Specific Log Probability of Death",
+    y = "Log Probability of Death"
+  )
+
+```
+
+Plotting the observed and estimated $q_x$ values, we see that the _Brass_ model
+also does a good job of capturing high child mortality, but underestimates
+the adult accident hump. In the old ages this model loses validity, since it
+was fix with a lower terminal age than is present in the observed data.
 
 
 ### _Q1.f_
 
+```{r}
+
+# Question 1f -------------------------------------------------------------
+
+tha_mort_2015_compare <- tha_mort_2015_model %>%
+  select(
+    age, n,
+    Observed = obs_Mx,
+    Gompertz,
+    Makeham,
+    `Heligman-Pollard`,
+    Brass = brass_pred_fit_mx
+  )
+
+# knitr::kable(
+#   tha_mort_2015_compare,
+#   booktabs = TRUE,
+#   digits = 3,
+#   caption = "Comparison of models against observed Mx in Thailand females, 2015-2020"
+# )
+
+tha_mort_2015_compare %>%
+  pivot_longer(!c(age, n), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Gompertz", "Makeham", "Heligman-Pollard", "Brass")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model)
+
+```
+
+
+```{r}
+
+tha_mort_2015_compare_fit <- tha_mort_2015_compare %>%
+  filter(age < 95) %>%
+  select(-age, -n) %>%
+  mutate_all(log) %>%
+  summarise_all(~rmse(., Observed)) %>%
+  select(-Observed) %>%
+  pivot_longer(everything(), names_to = "Model", values_to = "RMSE") %>%
+  arrange(RMSE)
+
+knitr::kable(
+  tha_mort_2015_compare_fit,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "$RMSE$ of estimated $log(M_x)$ against observed $log(M_x)$"
+)
+```
+
+Comparing all four of these models to the observed data, both visually and
+via the root mean-squared-error of log-transformed $M_x$, shows that the
+_Heligman-Pollard_ model most closely follows the observed data.
+
+
 ## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+tha_mort_wide <- tha_mort %>% pivot_wider(names_from = year, values_from = Mx)
+tha_mort_mat <- tha_mort_wide %>% column_to_rownames("age") %>% as.matrix()
+
+```
+
 ### _Q2.a_
+
+Using the _WPP2019 package_, we can extract the female age-specific mortality
+rates in Thailand in the for each five year period encompassing 1950-2020.
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+
+knitr::kable(
+  tha_mort_wide,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Thailand female age-specific mortality rates, 1950-2020"
+)
+
+```
+
+
 ### _Q2.b_
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+model_LC <- leecarter.estimate(tha_mort_mat)
+
+LC_lsq_mx <- with(model_LC, apply(
+  matrix(bx) %*% matrix(kt, nrow = 1), 2, function(x) ax + x
+))
+dimnames(LC_lsq_mx) <- dimnames(tha_mort_mat)
+
+tha_mort_lsq <- LC_lsq_mx %>%
+  as_tibble(rownames = "age") %>%
+  pivot_longer(-age, names_to = "year", values_to = "log_Mx") %>%
+  mutate(
+    year = as.integer(year),
+    age = as.integer(age),
+    `Least-squares Estimate` = exp(log_Mx),
+  ) %>%
+  select(-log_Mx)
+
+tha_LC_compare <- tha_mort %>%
+  left_join(tha_mort_lsq, by = c("age", "year")) %>%
+  rename(Observed = Mx)
+
+```
+
+The _Lee-Carter_ model is defined as:
+
+$$
+log(m_{x,t}) = a_x + k_t b_x + \epsilon_{x,t}
+$$
+
+One way to fit this model is the apply a set of constraints to $b_x$ and $k_t$.
+Under the constraints $\sum b_x = 1$ and $\sum k_t = 0$, we get:
+
+$$
+\hat{a}_x = \frac{1}{T} \sum_{t=1}^T log(m_{x,t}) \\
+\hat{k}_t = \sum_{x=0}^{A-1} \left[ log(m_{x,t}) - a_x \right]
+$$
+With these constraints, we can fit a  least squares regression on $\hat{b}_x$
+with an intercept of 0. Below are the estimated parameters and mortality rates
+
+_Note: This model was fit using the MortCast package._
+
+```{r}
+model_LC_ls_x_tbl <- tibble(
+  age = names(model_LC$ax),
+  ax = model_LC$ax,
+  least_squares_bx = model_LC$bx
+)
+
+model_LC_ls_t_tbl <- tibble(
+  year = names(model_LC$kt),
+  least_squares_kt = model_LC$kt
+)
+
+knitr::kable(
+  model_LC_ls_x_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Age", "$\\hat{a}_x$", "$\\hat{b}_x$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (least squares method)"
+)
+
+knitr::kable(
+  model_LC_ls_t_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "$\\hat{k}_t$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (least squares method)"
+)
+
+```
+
+```{r, fig.dim=c(7, 8.5)}
+tha_LC_compare %>%
+  pivot_longer(!c(year, age), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Least-squares Estimate")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model) +
+  facet_wrap(vars(year), ncol = 3) +
+  labs(subtitle = "Thailand, Females, 1950-2020")
+
+```
+
+
 ### _Q2.c_
+
+```{r}
+
+# Question 2c -------------------------------------------------------------
+
+ax_hat <- rowMeans(log(tha_mort_mat))
+model_LC_svd <- svd(apply(log(tha_mort_mat), 2, function(x) x - ax_hat), 1, 1)
+
+# Get normalized bx and kt
+LC_svd_bx <- model_LC_svd$u / sum(model_LC_svd$u)
+LC_svd_kt <- t(model_LC_svd$v) * sum(model_LC_svd$u) * model_LC_svd$d[1]
+
+LC_svd_mx <- apply(LC_svd_bx %*% LC_svd_kt, 2, function(x) ax_hat + x)
+dimnames(LC_svd_mx) <- dimnames(tha_mort_mat)
+
+tha_mort_svd <- LC_svd_mx %>%
+  as_tibble(rownames = "age") %>%
+  pivot_longer(-age, names_to = "year", values_to = "log_Mx") %>%
+  mutate(
+    year = as.integer(year),
+    age = as.integer(age),
+    `SVD Estimate` = exp(log_Mx),
+  ) %>%
+  select(-log_Mx)
+
+tha_LC_compare <- tha_LC_compare %>%
+  left_join(tha_mort_svd, by = c("age", "year"))
+
+```
+
+A singular value decomposition can also be used to implement the _Lee-Carter_
+model, where the matrix $C = \left[ log(m_{x,t}) - a_x \right]$ is used to get
+$b_x$ and $k_t$ with the decomposition:
+
+$$ \text{SVD}(C) = U \Lambda V^\top $$
+
+Where:
+
+$$
+b_x = U_{x,1} \div \sum_x U_{x,1} \\
+k_t = \left[ V^\top \right]_{1,t} \times \sum U_{x,1} \times \Lambda_1
+$$
+
+are the normalized estimates. The estimated parameters and fitted values are
+below.
+
+```{r}
+model_LC_svd_x_tbl <- tibble(
+  age = names(model_LC$bx),
+  svd_bx = as.vector(LC_svd_bx)
+)
+
+model_LC_svd_t_tbl <- tibble(
+  year = names(model_LC$kt),
+  svd_kt = as.vector(LC_svd_kt),
+)
+
+knitr::kable(
+  model_LC_svd_x_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Age", "$b_x$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (SVD method)"
+)
+
+knitr::kable(
+  model_LC_svd_t_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "$k_t$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (SVD method)"
+)
+
+```
+
+
+```{r fig.dim=c(7, 8.5)}
+tha_LC_compare %>%
+  pivot_longer(!c(year, age), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "SVD Estimate")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model) +
+  facet_wrap(vars(year), ncol = 3) +
+  labs(subtitle = "Thailand, Females, 1950-2020")
+
+```
+
+Comparing the estimated $M_x$ from the normalized SVD to our observed data, we
+see that the estimates also track the observed data well. Note that if we
+were to use the unnormalized SVD, the estimated $M_x$ would remain mostly
+constant over time, matching the middle years the closest (since those years
+are closest to the mean over time).
+
+
 ### _Q2.d_
+
+```{r}
+
+# Question 2d -------------------------------------------------------------
+
+LC_compare_bx_tbl <- model_LC_ls_x_tbl %>%
+  left_join(model_LC_svd_x_tbl, by = "age") %>%
+  select(-ax) %>%
+  mutate(abs_diff = abs(least_squares_bx - svd_bx))
+
+LC_compare_kt_tbl <- model_LC_ls_t_tbl %>%
+  left_join(model_LC_svd_t_tbl, by = "year") %>%
+  mutate(abs_diff = abs(least_squares_kt - svd_kt))
+
+tha_LC_compare_fit <- tha_LC_compare %>%
+  group_by(year) %>%
+  select(-age) %>%
+  mutate_at(vars(-group_cols()), log) %>%
+  summarise_all(~rmse(., Observed)) %>%
+  select(-Observed) %>%
+  ungroup() %>%
+  select(-year) %>%
+  summarize_all(mean) %>%
+  pivot_longer(everything(), names_to = "Model", values_to = "RMSE") %>%
+  arrange(RMSE)
+
+knitr::kable(
+  LC_compare_bx_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Age", "LS $\\hat{b}_x$", "SVD $\\hat{b}_x$", "diff"),
+  eval = FALSE,
+  caption = "Lee-Carter model comparison"
+)
+
+knitr::kable(
+  LC_compare_kt_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "LS $\\hat{k}_t$", "SVD $\\hat{k}_t$", "diff"),
+  eval = FALSE,
+  caption = "Lee-Carter model comparison"
+)
+
+knitr::kable(
+tha_LC_compare_fit,
+booktabs = TRUE,
+digits = 4,
+caption = "$RMSE$ of estimated $log(M_x)$ against observed $log(M_x)$"
+)
+
+```
+
+Looking at the previous two plots, and comparing the root mean-squared-error
+of the log-transformed fitted $M_x$ against the observed $M_x$, we see that,
+while close, the normalized SVD _Lee-Carter_ method performs the best.
+
+
 ### _Q2.e_
+
+```{r}
+
+# Question 2e -------------------------------------------------------------
+
+data(popF, package = "wpp2019")
+
+mex_pop <- popF %>%
+  filter(name == "Mexico") %>%
+  select(-country_code, -name, -`2020`) %>%
+  extract(age, "age", convert = TRUE) %>%
+  column_to_rownames("age") %>%
+  as.matrix() %>%
+  `*`(1000)
+
+mex_mort_tbl <- mxF %>%
+  filter(name == "Mexico") %>%
+  select(-country_code, -name) %>%
+  pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
+  extract(period, "year", regex = "(^[:digit:]{4})", convert = TRUE) %>%
+  filter(year < 2020)
+
+# Collapse 0 and 1-4 age group Mx
+mex_mort_tbl_u5 <- mex_mort_tbl %>%
+  filter(age < 5) %>%
+  mutate(
+    n = age * 3 + 1,
+    sx = 1 - mx_to_qx(Mx, n)
+  ) %>%
+  group_by(year) %>%
+  summarise(sx = prod(sx)) %>%
+  mutate(
+    age = 0,
+    Mx = qx_to_mx(1 - sx, 5)
+  ) %>%
+  select(age, year, Mx)
+
+mex_mort <- mex_mort_tbl %>%
+  filter(age >= 5) %>%
+  bind_rows(mex_mort_tbl_u5) %>%
+  pivot_wider(names_from = year, values_from = Mx) %>%
+  arrange(age) %>%
+  column_to_rownames("age") %>%
+  as.matrix()
+
+demog_data <- demogdata(
+  data = mex_mort,
+  pop = mex_pop,
+  ages = seq(0, 100, 5),
+  years = seq(1950, 2015, 5),
+  type = "mortality",
+  label = "Mexico",
+  name = "Female"
+)
+
+model_mex_LC <- demography::lca(demog_data)
+
+forecast_mex <- forecast(model_mex_LC, h = 1, level = 95, se = "innovonly")
+
+forecast_mex_kt <- as_tibble(forecast_mex[["kt.f"]])
+
+forecast_mex_mx <- forecast_mex$rate %>%
+  as_tibble() %>%
+  mutate_all(as.vector) %>%
+  mutate(age = rownames(forecast_mex$rate$Female)) %>%
+  select(age, Mx = Female, lower_95 = lower, upper_95 = upper)
+
+forecast_mex_mx_75 <- forecast_mex_mx %>% filter(age == 75)
+
+```
+
+The _Lee-Carter_ method can also be used to obtain a probabilistic forecast of
+mortality. Here we use the _demography_ _R_ package to forecast mortality for
+females in Mexico in the period 2020-2025. Below are the predicted mortality
+index $k_t$ and mortality rate for females in the 75-80 age group. The
+confidence level is set to $95\%$.
+
+
+```{r}
+knitr::kable(
+  forecast_mex_kt,
+  booktabs = TRUE,
+  digits = 3,
+  eval = FALSE,
+  col.names = c("Est. $k_t$", "95% Low", "95% High"),
+  caption = "Forecast $k_t$"
+)
+
+knitr::kable(
+  select(forecast_mex_mx_75, -age),
+  booktabs = TRUE,
+  digits = 3,
+  eval = FALSE,
+  col.names = c("Est. $M_x$", "95% Low", "95% High"),
+  caption = "Forecast mortality for age group 75-80"
+)
+```
+
+
 
 # Appendix
 
