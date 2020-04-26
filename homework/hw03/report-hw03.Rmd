@@ -103,7 +103,7 @@ table and a log-transformed graph below.
 
 ```{r}
 knitr::kable(
-  select(tha_mort_2015, -qx),
+  select(tha_mort_2015, age, n, Mx),
   booktabs = TRUE,
   col.names = c("Age", "n", "${}_{n}M_x$"),
   caption = "Thailand 2015-2020 female mortality rates",
