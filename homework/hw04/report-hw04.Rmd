@@ -28,16 +28,146 @@ rm(gr)
 
 # Load libraries
 library(ggplot2)
+library(tibble)
+
+# Helper functions
+scale_integer <- function(x, n = 1) seq(ceiling(x[1]), floor(x[2]), by = n)
+
+# Control randomness
+set.seed(9876)
 
 ```
 
 ## _Q1_
 
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+n_married <- 112
+divorced_n_obs <- 43
+
+divorced_prob_obs <- divorced_n_obs / n_married
+divorced_dist <- function(n, p) rbinom(n, n_married, p)
+divorced_prior_dist <- function(n) rbeta(n, 1, 1)
+
+```
+
 ### _Q1.a_
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+```
+
+
+
 ### _Q1.b_
+
+```{r}
+
+# Question 1b -------------------------------------------------------------
+
+divorced_n_sims <- 1000
+
+divorced_prob_draws <- divorced_prior_dist(divorced_n_sims)
+divorced_dist_draws <- divorced_dist(divorced_n_sims, divorced_prob_draws)
+
+divorced_post_dist <- divorced_prob_draws[divorced_dist_draws == divorced_n_obs]
+
+divorced_post_tbl <- tibble(
+  Mean = quantile(divorced_post_dist, .5),
+  `95% Low` = quantile(divorced_post_dist, .025),
+  `95% High` = quantile(divorced_post_dist, .975)
+)
+
+```
+
+```{r}
+knitr::kable(
+  divorced_post_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Posterior distribution summary"
+)
+
+```
+
+
+
 ### _Q1.c_
 
+```{r}
+
+# Question 1c -------------------------------------------------------------
+
+divorced_post_plot <- ggplot(data = NULL, aes(divorced_post_dist)) +
+  geom_bar() +
+  scale_x_binned(n.breaks = 6) +
+  scale_y_continuous(breaks = function(x) scale_integer(x, 2)) +
+  theme_bw() +
+  theme(
+    text = element_text(family = "serif"),
+    panel.grid.major.x = element_blank()
+  ) +
+  labs(
+    title = "Posterior Density Estimate",
+    subtitle = "Probability of divorce by 2015 given marriage in 2005",
+    x = "Probability of Divorce",
+    y = "Count"
+  )
+
+divorced_post_plot
+
+```
+
+
 ## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+study_obs <- c(
+   2.1, 9.8, 13.9, 11.3, 8.9, 15.7, 16.4, 4.5, 8.9, 11.9, 12.5, 11.1, 11.6,
+  14.5, 9.6,  7.4,  3.3, 9.1,  9.4,  6.0, 7.4, 8.5,  1.6, 11.4,  9.7
+)
+
+study_sd_true <- 4
+study_dist <- function(n, mean) rnorm(n, mean = mean, sd = study_sd_true)
+study_prior_dist <- function(n) rnorm(n, mean = 10, sd = 3)
+
+```
+
+```{r}
+
+study_n_sims <- 1000
+
+study_mean_draws <- study_prior_dist(study_n_sims)
+study_dist_draws <- study_dist(study_n_sims, study_mean_draws)
+
+study_post_dist <- study_mean_draws[study_dist_draws == mean(study_obs)]
+
+study_post_tbl <- tibble(
+  Mean = quantile(study_post_dist, .5),
+  `95% Low` = quantile(study_post_dist, .025),
+  `95% High` = quantile(study_post_dist, .975)
+)
+
+
+```
+
+```{r}
+knitr::kable(
+  study_post_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Posterior distribution summary"
+)
+
+```
+
 
 # Appendix
 
