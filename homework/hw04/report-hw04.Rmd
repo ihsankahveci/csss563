@@ -29,9 +29,26 @@ rm(gr)
 # Load libraries
 library(ggplot2)
 library(tibble)
+library(tidyr)
 
 # Helper functions
-scale_integer <- function(x, n = 1) seq(ceiling(x[1]), floor(x[2]), by = n)
+post_draws_density <- function(data, ...) {
+
+
+  ggplot(data, aes(...)) +
+    geom_density() +
+    theme_bw() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom"
+    ) +
+    labs(
+      subtitle = paste0("Posterior density estimate (Gaussian kernel)"),
+      y = "Density",
+      color = "Type"
+    )
+
+}
 
 # Control randomness
 set.seed(9876)
@@ -149,6 +166,11 @@ divorced_post_tbl <- tibble(
 
 ```
 
+From our analytic posterior distribution of $\theta$, we simulate a new sample
+of $`r formatC(divorced_n_sims, big.mark = ",")`$ people. From this sample, we
+can get a $95\%$ Bayesian confidence interval for $\theta$ by pulling the
+$2.5^{th}$ and $97.5^{th}$ percentile of the data.
+
 ```{r}
 knitr::kable(
   divorced_post_tbl,
@@ -160,41 +182,42 @@ knitr::kable(
 ```
 
 
-
 ### _Q1.c_
 
 ```{r}
 
 # Question 1c -------------------------------------------------------------
 
-post_draws_density <- function(draws) {
+divorced_true_post <- tibble(
+  value = qbeta(seq(0, 1, .001), 44, 77),
+  type = "True Distribution"
+)
 
-  ggplot(data = NULL, aes(draws)) +
-  geom_bar() +
-  scale_x_binned(n.breaks = 16) +
-  theme_bw() +
-  theme(
-    text = element_text(family = "serif"),
-    panel.grid.major.x = element_blank()
-  ) +
-  labs(
-    title = "Posterior Density Estimate",
-    y = "Count"
-  )
+divorced_est_post <- tibble(
+  value = divorced_posterior_draws,
+  type = "Estimate"
+)
 
-}
+divorced_post_compare_tbl <- dplyr::bind_rows(
+  divorced_true_post, divorced_est_post
+)
 
+```
+
+With the new sample from our posterior, we can plot a nonparametric density
+estimate for our posterior. The true distribution is also included for
+reference. Both density curves use a Gaussian kernel.
+
+```{r}
 divorced_post_plot <-
-  post_draws_density(divorced_posterior_draws) +
+  post_draws_density(divorced_post_compare_tbl, x = value, color = type) +
   labs(
-    subtitle = "Probability of divorce by 2015 given marriage in 2005",
+    title = "Probability of Divorce by 2015, Given Marriage in 2005",
     x = "Probability of Divorce"
   )
 
 divorced_post_plot
-
 ```
-
 
 ## _Q2_
 
@@ -207,29 +230,75 @@ study_obs <- c(
   14.5, 9.6,  7.4,  3.3, 9.1,  9.4,  6.0, 7.4, 8.5,  1.6, 11.4,  9.7
 )
 
-study_sd_true <- 4
-study_dist <- function(n, mean) rnorm(n, mean = mean, sd = study_sd_true)
-study_prior_dist <- function(n) rnorm(n, mean = 10, sd = 3)
+study_obs_mean <- mean(study_obs)
+
+study_true_sd <- 4
+study_prior_mean <- 10
+study_prior_sd <- 3
+
+study_post_mean <- `+`(
+  study_prior_sd^2 / (study_true_sd^2 + study_prior_sd^2) * study_obs_mean,
+  study_true_sd^2 / (study_true_sd^2 + study_prior_sd^2) * study_prior_mean
+)
+
+study_post_sd <- study_true_sd^2 * study_prior_sd^2 / (study_true_sd^2 + study_prior_sd^2)
 
 ```
 
+In this scenario, we take both our likelihood and prior distributions to be
+normal:
+
+$$
+\begin{aligned}
+X \mid \theta  &\propto N(\theta, \sigma^2) \\
+\theta &\propto N(\mu, \tau^2)
+\end{aligned}
+$$
+where we are given $\mu = `r study_prior_mean`$, $\tau = `r study_prior_sd`$,
+and $\sigma = `r study_true_sd`$.
+
+Since the normal distribution is a conjugate prior with itself, we know that
+the form of the the posterior distribution must be:
+
+$$
+\begin{aligned}
+P(X=x; \mu, \tau, \sigma) &= N \left(
+\frac{\tau^2}{\sigma^2 + \tau^2} x +  \frac{\sigma^2}{\sigma^2 + \tau^2} \mu,
+\frac{\sigma^2 \tau^2}{\sigma^2 + \tau^2}
+\right) \\
+P(X= `r study_obs_mean`; 10, 3, 4 ) &= N \left(
+\frac{3^2}{4^2 + 3^2} `r study_obs_mean` +  \frac{4^2}{4^2 + 3^2} (10),
+\frac{4^2 3^2}{4^2 + 3^2}
+\right) \\
+&= N \left( \frac{9}{25} `r study_obs_mean` + \frac{160}{25},  \frac{144}{25} \right) \\
+&= N(9.81, 5.76)
+\end{aligned}
+$$
+
+with $x = `r study_obs_mean`$, our observed mean.
+
 ```{r}
+
+study_posterior <- function(n) rnorm(n, study_post_mean, study_post_sd)
 
 study_n_sims <- 1000
 
-study_mean_draws <- study_prior_dist(study_n_sims)
-study_dist_draws <- study_dist(study_n_sims, study_mean_draws)
-
-study_post_dist <- study_mean_draws[study_dist_draws == mean(study_obs)]
+study_posterior_draws <- study_posterior(study_n_sims)
 
 study_post_tbl <- tibble(
-  Mean = quantile(study_post_dist, .5),
-  `95% Low` = quantile(study_post_dist, .025),
-  `95% High` = quantile(study_post_dist, .975)
+  Mean = mean(study_posterior_draws),
+  Median = quantile(study_posterior_draws, .5),
+  `95% Low` = quantile(study_posterior_draws, .025),
+  `95% High` = quantile(study_posterior_draws, .975)
 )
 
 
 ```
+
+We can draw $`r formatC(study_n_sims, big.mark = ",")`$ new values from this
+posterior distribution to get a new sample. From this sample, we
+can get a $95\%$ Bayesian confidence interval for $\theta$ by pulling the
+$2.5^{th}$ and $97.5^{th}$ percentile of the data.
 
 ```{r}
 knitr::kable(
@@ -240,6 +309,38 @@ knitr::kable(
 )
 
 ```
+
+```{r}
+study_true_post <- tibble(
+  value = qnorm(seq(0, 1, .001), study_post_mean, study_post_sd),
+  type = "True Distribution"
+)
+
+study_est_post <- tibble(
+  value = study_posterior_draws,
+  type = "Estimate"
+)
+
+study_post_compare_tbl <- dplyr::bind_rows(
+  study_true_post, study_est_post
+)
+
+```
+
+Again, we can compare the posterior kernel density estimate of the new draws
+to the true distribution (with a Gaussian kernel):
+
+```{r}
+divorced_post_plot <-
+  post_draws_density(study_post_compare_tbl, x = value, color = type) +
+  labs(
+    title = "Mean Study Time",
+    x = "Mean Study Time (hours)"
+  )
+
+divorced_post_plot
+```
+
 
 
 # Appendix
