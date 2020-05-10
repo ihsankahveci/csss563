@@ -1,6 +1,7 @@
 ### Class-specific files ###
 
 lectures/*.pdf
+homework/hw*/data/
 
 # Created by https://www.gitignore.io/api/r
 # Edit at https://www.gitignore.io/?templates=r
