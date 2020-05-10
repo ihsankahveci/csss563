@@ -28,9 +28,18 @@ rm(gr)
 
 # Load libraries
 library(dplyr)
+library(tidyr)
 library(ggplot2)
+library(bayesTFR)
 
-# Helper functions
+# Data
+data("egsingle", package = "mlmRev")
+data("tfr", package = "wpp2019")
+tfr_sim_dir <- "./data/sim01192018"
+
+tfr_all <- tfr %>%
+  select(-country_code, -last.observed) %>%
+  pivot_longer(-name, values_to = "tfr", names_pattern = "^(.*)-", names_to = "year")
 
 # Control randomness
 set.seed(9876)
@@ -38,6 +47,15 @@ set.seed(9876)
 ```
 
 ## _Q1_
+
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+edu_data <- egsingle %>% filter(year == .5)
+
+```
+
 
 ### _Q1.a_
 ### _Q1.b_
@@ -47,11 +65,28 @@ set.seed(9876)
 
 ## _Q2_
 
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+hnd_tfr <- tfr_all %>% filter(name == "Honduras") %>% select(-name)
+
+```
+
+
 ### _Q2.a_
 ### _Q2.b_
 ### _Q2.c_
 
 ## _Q3_
+
+```{r}
+
+# Question 3 --------------------------------------------------------------
+
+nld_tfr <- tfr_all %>% filter(name == "Netherlands") %>% select(-name)
+
+```
 
 ### _Q3.a_
 ### _Q3.b_
@@ -59,7 +94,25 @@ set.seed(9876)
 
 ## _Q4_
 
+```{r}
+
+# Question 4 --------------------------------------------------------------
+
+```
+
 ### _Q4.a_
+
+```{r}
+
+# Question 4.a ------------------------------------------------------------
+
+tfr_mcmc  <- get.tfr.mcmc(tfr_sim_dir)
+tfr3_mcmc <- get.tfr3.mcmc(tfr_sim_dir)
+tfr_pred  <- get.tfr.prediction(tfr_sim_dir)
+
+```
+
+
 ### _Q4.b_
 ### _Q4.c_
 
