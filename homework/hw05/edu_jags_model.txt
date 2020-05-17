@@ -1,0 +1,15 @@
+model {
+
+  for(j in 1:n_schools) {
+    alpha_j[j] ~ dnorm(mu_alpha, sig_alpha)
+    for(i in 1:n_students) {
+      Y[i, j] ~ dnorm(alpha_j[j], sig_y)
+    }
+  }
+
+  # Priors
+  mu_alpha ~ dnorm(0, 0.0001)
+  sig_alpha ~ dgamma(1, 0.0001)
+  sig_y ~ dgamma(1, 0.0001)
+
+}

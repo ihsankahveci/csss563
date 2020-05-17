@@ -30,6 +30,7 @@ rm(gr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(R2jags)
 library(bayesTFR)
 
 # Data
@@ -39,7 +40,13 @@ tfr_sim_dir <- "./data/sim01192018"
 
 tfr_all <- tfr %>%
   select(-country_code, -last.observed) %>%
-  pivot_longer(-name, values_to = "tfr", names_pattern = "^(.*)-", names_to = "year")
+  pivot_longer(
+    -name,
+    values_to = "tfr",
+    names_pattern = "^(.*)-",
+    names_to = "year",
+    names_ptypes = list(year = numeric())
+  )
 
 # Control randomness
 set.seed(9876)
@@ -52,16 +59,113 @@ set.seed(9876)
 
 # Question 1 --------------------------------------------------------------
 
-edu_data <- egsingle %>% filter(year == .5)
+edu_data <- egsingle %>%
+  filter(year == .5) %>%
+  select(childid, schoolid, math) %>%
+  pivot_wider(names_from = "schoolid", values_from = "math") %>%
+  tibble::column_to_rownames("childid") %>%
+  as.matrix()
 
 ```
 
-
 ### _Q1.a_
+
+For a student $i$ in school $j$, our Bayesian random effects one-way analysis
+of variance model is written as:
+
+$$
+\begin{aligned}
+y_i &= \alpha_{j[i]} + \epsilon_i, \\
+\epsilon_i &\stackrel{iid}{\sim} N(0, \sigma_y^2), \\
+\alpha_j   &\stackrel{iid}{\sim} N(\mu_\alpha, \sigma_\alpha^2)
+\end{aligned}
+$$
+
+where the standard deviation of error in estimating individual student
+performance ($\sigma_y$), the mean performance across all schools
+($\mu_\alpha$), and the standard deviation in performance across all schools
+($\sigma_\alpha$) are the unknown parameters to be estimated.
+
 ### _Q1.b_
+
+For this scenario, we set the prior distributions to:
+
+$$
+\begin{aligned}
+\mu_\alpha    &\sim N(0, 0.0001) \\
+\sigma_\alpha &\sim \text{Gamma}(1, 0.0001) \\
+\sigma_y      &\sim \text{Gamma}(1, 0.0001)
+\end{aligned}
+$$
+
 ### _Q1.c_
+
+```{r}
+
+# Question 1c -------------------------------------------------------------
+
+n_students <- dim(edu_data)[1]
+n_schools <- dim(edu_data)[2]
+
+edu_model <- jags.model(
+  "./edu_jags_model.txt",
+  data = list(Y = edu_data, n_students = n_students, n_schools = n_schools),
+  n.chains = 3
+)
+
+edu_sample_priors <- coda.samples(
+  model = edu_model,
+  variable.names = c("mu_alpha", "sig_y", "sig_alpha"),
+  n.iter = 3000,
+  thin = 10
+)
+
+edu_sample_schools <- coda.samples(
+  model = edu_model,
+  variable.names = "alpha_j",
+  n.iter = 3000,
+  thin = 10
+)
+
+```
+
+This model was fit using JAGS.
+
 ### _Q1.d_
+
+```{r fig.asp=1.5, fig.width=7.5}
+
+# Question 1d -------------------------------------------------------------
+
+plot(edu_sample_priors)
+
+```
+
+Running the model for 3000 iterations is enough to achieve convergence.
+
 ### _Q1.e_
+
+```{r}
+
+# Question 1e -------------------------------------------------------------
+
+edu_quantiles_tbl <- summary(edu_sample_priors)[["quantiles"]] %>%
+  as_tibble() %>%
+  mutate(Parameter = c("mu", "sigma alpha", "sigma y")) %>%
+  select(Parameter, everything())
+
+
+knitr::kable(
+  edu_quantiles_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Summary of posterior distribution of prior parameters"
+)
+
+```
+
+We can get the summary of our posterior distributions, and look at the density
+plots of the distributions in question _(1.d)_.
 
 ## _Q2_
 
@@ -75,6 +179,15 @@ hnd_tfr <- tfr_all %>% filter(name == "Honduras") %>% select(-name)
 
 
 ### _Q2.a_
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+
+# run.tfr.mcmc() or nls()?
+
+```
+
 ### _Q2.b_
 ### _Q2.c_
 
@@ -89,14 +202,152 @@ nld_tfr <- tfr_all %>% filter(name == "Netherlands") %>% select(-name)
 ```
 
 ### _Q3.a_
+
+```{r}
+
+# Question 3a -------------------------------------------------------------
+
+nld_phase3_year <- nld_tfr %>%
+  arrange(year) %>%
+  filter(tfr < 2) %>%
+  mutate(
+    year_diff = lead(year) - year,
+    period_5 = year_diff == 5 & lag(year_diff) == 5,
+    two_increases = tfr > lag(tfr, 1) & tfr < lead(tfr, 1)
+  ) %>%
+  filter(period_5 & two_increases) %>%
+  slice(1) %>%
+  pull(year)
+
+```
+
+```{r}
+knitr::kable(
+  nld_tfr,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Period Start", "TFR"),
+  caption = "Total fertility rates, Netherlands, 1950-2020"
+)
+```
+
+The start of Phase III of the fertility model is defined by two consecutive
+five-year increases of TFR while staying below a TFR of 2. Looking at TFR data
+for the Netherlands, we see that Phase III starts with the period beginning
+in **`r nld_phase3_year`**.
+
 ### _Q3.b_
+
+```{r}
+
+# Question 3b -------------------------------------------------------------
+
+nld_model <- nld_tfr %>%
+  filter(year >= nld_phase3_year) %>%
+  pull(tfr) %>%
+  ar(aic = FALSE, order.max = 1, method = "mle")
+
+nld_model_results <- tibble(
+  Mean = nld_model$x.mean,
+  `AR param.` = nld_model$ar,
+  `Error var.` = nld_model$var.pred
+)
+
+```
+
+We now fit an order $1$ autoregressive model to the subset of Netherlands TFR
+data in Phase III, and extract some model parameters below.
+_Note that the AR(1) model was fit using the "mle" method._
+
+```{r}
+knitr::kable(
+  nld_model_results,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Netherlands Phase III AR(1) model parameters"
+)
+```
+
 ### _Q3.c_
+
+```{r}
+
+# Question 3c -------------------------------------------------------------
+
+nld_ar_rho <- nld_model$ar
+rep_tfr <- 2.1
+nld_tfr_2015 <- nld_tfr %>% filter(year == 2015) %>% pull(tfr)
+
+nld_pred_mean <- rep_tfr + nld_ar_rho * (nld_tfr_2015 - rep_tfr)
+nld_pred_sd <- sqrt(nld_model$var.pred)
+
+nld_pred_dist <- qnorm(seq(.001, .999, .001), mean = nld_pred_mean, sd = nld_pred_sd)
+
+nld_pred_tbl <- tibble(
+  Mean = nld_pred_mean,
+  Median = median(nld_pred_dist),
+  `2.5% PI` = Mean - 1.96 * nld_pred_sd,
+  `97.5% PI` = Mean + 1.96 * nld_pred_sd
+)
+
+```
+
+A post-transition (Phase III) model of TFR change, as proposed in
+_Lee RD, Tuljapurkar S (1994), Stochastic population forecasts for the
+United States: beyond high, medium, and low_, is defined as:
+
+$$
+f_{c,t+1} \sim N(\mu + \rho(f_{c,t} - \mu), s^2)
+$$
+
+where $f_{c,t}$ is the TFR of country $c$ in the five-year period starting at
+$t$, $\mu$ is the approximate replacement-level fertility $2.1$, $\rho$ is the
+autoregressive parameter, and $s$ is the standard deviation of the random
+errors.
+
+Plugging in these values, we analytically find the distribution of Netherlands
+TFR for 2020-2025 to be:
+
+$$
+f_{c,2020} \sim N(`r round(nld_pred_mean, 3)`, `r round(nld_pred_sd, 3)`^2)
+$$
+
+```{r}
+knitr::kable(
+  nld_pred_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Predictive distribution summary of Netherlands TFR, 2020-2025"
+)
+
+```
+
+
+```{r}
+ggplot(tibble(nld_pred_dist), aes(x = nld_pred_dist)) +
+  geom_density(fill = "coral", alpha = .25) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predictive Distribution of TFR",
+    subtitle = "Netherlands, 2020-2025",
+    x = "Predicted TFR",
+    y = "Density"
+  )
+
+```
+
 
 ## _Q4_
 
 ```{r}
 
 # Question 4 --------------------------------------------------------------
+
+tfr_dza_mar <- tfr_all %>%
+  filter(name %in% c("Algeria", "Morocco")) %>%
+  pivot_wider(names_from = name, values_from = "tfr") %>%
+  rename(`Period Start` = year)
 
 ```
 
@@ -106,15 +357,95 @@ nld_tfr <- tfr_all %>% filter(name == "Netherlands") %>% select(-name)
 
 # Question 4.a ------------------------------------------------------------
 
-tfr_mcmc  <- get.tfr.mcmc(tfr_sim_dir)
-tfr3_mcmc <- get.tfr3.mcmc(tfr_sim_dir)
+tfr_phase2_mcmc  <- get.tfr.mcmc(tfr_sim_dir)
+tfr_phase3_mcmc <- get.tfr3.mcmc(tfr_sim_dir)
 tfr_pred  <- get.tfr.prediction(tfr_sim_dir)
 
 ```
 
+The fully converged simulation is loaded using the `README` file contained with
+the data.
 
 ### _Q4.b_
+
+```{r}
+
+# Question 4.b ------------------------------------------------------------
+
+DLcurve.plot(
+  tfr_phase2_mcmc,
+  country = "Algeria",
+  nr.curves = 50,
+  pi = 95
+)
+
+DLcurve.plot(
+  tfr_phase2_mcmc,
+  country = "Morocco",
+  nr.curves = 50,
+  pi = 95
+)
+
+```
+
+From the above graphs comparing the Phase II double logistic models for
+Algeria and Morocco, we see that the TFR decrements maintains higher values
+across TFR in Algeria for both the median and 95% PI, suggesting that
+fertility is declining faster in Algeria than Morocco. We can also observe
+this trend by looking directly at the TFR for both countries over time:
+
+```{r}
+knitr::kable(
+  tfr_dza_mar,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "TFR over time"
+)
+```
+
+
 ### _Q4.c_
+
+```{r}
+
+# Question 4c -------------------------------------------------------------
+
+tfr_traj_dza <- get.tfr.trajectories(tfr_pred, country = "Algeria")[-(1:2), ]
+tfr_traj_mar <- get.tfr.trajectories(tfr_pred, country = "Morocco")[-(1:2), ]
+
+prob_tfr_dza_higher <- rowMeans(tfr_traj_dza > tfr_traj_mar)
+
+prob_tfr_dza_higher_tbl <- tibble(
+  period_start = as.integer(names(prob_tfr_dza_higher)) - 3,
+  prob_dza_higher = prob_tfr_dza_higher
+)
+
+prob_tfr_dza_higher_all <-
+  sum(apply(tfr_traj_dza > tfr_traj_mar, 2, all)) / ncol(tfr_traj_dza)
+
+```
+
+By getting the TFR trajectories for Algeria and Morocco, we can find the
+posterior predictive probability for many conditions.
+
+First, we can determine the probability of Algeria having a higher TFR than
+Morocco in each five-year period from 2020 through 2095 by finding the mean
+number of times Algeria has a higher TFR than Morocco across all simulations:
+
+```{r}
+knitr::kable(
+  prob_tfr_dza_higher_tbl,
+  booktabs = "TRUE",
+  digits = 3,
+  col.names = c("Period Start", "Pr(DZA > MAR)")
+)
+```
+
+We can also find the probability that the TFR of Algeria will be higher than that
+of Morocco in all five-year periods from 2020 through 2095 by finding the
+mean number of simulations where Algeria has a higher TFR than Morocco for all
+periods. This value is calculated to be
+**`r round(prob_tfr_dza_higher_all, 3)`**.
 
 
 # Appendix
