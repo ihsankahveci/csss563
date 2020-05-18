@@ -14,7 +14,7 @@ output:
 
 gr <- 2 / (1 + sqrt(5))
 
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, fig.asp = gr)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.asp = gr)
 options(knitr.kable.NA = '-')
 
 rm(gr)
@@ -29,12 +29,28 @@ rm(gr)
 # Load libraries
 library(dplyr)
 library(tidyr)
+library(tibble)
 library(ggplot2)
 library(bayesLife)
+library(bayesPop)
 
 # Data
 data("e0F", package = "wpp2019")
-e0_sim_dir <- "./data/sim03092016"
+e0_sim_dir <- "./data/e0/sim03092016"
+tfr_sim_dir <- "./data/tfr/sim01192018"
+pop_sim_dir <- "./data/pop/sim05172020"
+mig_file <- "./data/WPP2019_Period_Indicators_Medium.csv"
+can_mig_num_file <- "./data/statcan_migration.csv"
+
+e0f_all <- e0F %>%
+  select(-country_code, -last.observed) %>%
+  pivot_longer(
+    cols = -name,
+    names_to = "year",
+    values_to = "e0",
+    names_pattern = "(.*)-"
+  ) %>%
+  mutate(year = as.integer(year))
 
 # Control randomness
 set.seed(9876)
@@ -43,30 +59,535 @@ set.seed(9876)
 
 ## _Q1_
 
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+e0f_hnd <- e0f_all %>%
+  filter(name == "Honduras") %>%
+  select(-name) %>%
+  mutate(gain = lead(e0) - e0)
+
+knitr::kable(
+  e0f_hnd,
+  booktabs = TRUE, digits = 3, eval = FALSE,
+  col.names = c("Period start", "$e_0$", "Gain"),
+  caption = "Honduras female life expectancy at birth and observed gains, 1950-2020"
+)
+
+```
+
 ### _Q1.a_
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+dl_gain <- function(l, theta) {
+
+  d1 <- theta[1]
+  d2 <- theta[2]
+  d3 <- theta[3]
+  d4 <- theta[4]
+
+  k <- theta[5]
+  z <- theta[6]
+
+  (
+    (k       / (1 + exp( (-2*log(9) / d2) * (l - d1         - .5*d2) ))) +
+    ((z - k) / (1 + exp( (-2*log(9) / d4) * (l - (d1+d2+d3) - .5*d4) )))
+  )
+
+}
+
+ls_err <- function(func, data, obs_vals) {
+
+  function(params) {
+    fit_vals <- func(data, params)
+    sum((fit_vals - obs_vals)^2)
+  }
+
+}
+
+```
+
+```{r}
+opt_input <- e0f_hnd %>% slice(-n())
+loss_func <- ls_err(dl_gain, opt_input$e0, opt_input$gain)
+
+starting_params <- c(3, 3, 4, 2, 1, 4)
+opt_result <- optim(starting_params, loss_func)
+
+opt_params <- opt_result$par
+opt_err_var <- opt_result$value
+
+```
+
+
 ### _Q1.b_
+
+```{r}
+
+# Question 1b -------------------------------------------------------------
+
+e0f_hnd_gains <- e0f_hnd %>%
+  rename(obs_gain = gain) %>%
+  mutate(fit_gain = dl_gain(e0, opt_params))
+
+ggplot(e0f_hnd_gains, aes(x = obs_gain, y = fit_gain)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "cadetblue") +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Fit vs Observed Gains",
+    subtitle = "Honduras e0, 1950-2020",
+    x = "Observed Gain (years)",
+    y = "Fitted Gain (years)"
+  )
+
+```
+
+
 ### _Q1.c_
+
+```{r}
+
+# Question 1c -------------------------------------------------------------
+
+hnd_e0_2020_mean <- e0f_hnd_gains %>%
+  filter(year == 2015) %>%
+  select(e0, fit_gain) %>%
+  rowSums()
+
+hnd_e0_2020_sd <- sqrt(opt_err_var)
+
+hnd_e0_2020_dist <- qnorm(
+  seq(.0005, .9995, .001),
+  mean = hnd_e0_2020_mean,
+  sd = hnd_e0_2020_sd
+)
+
+```
+
+
+```{r}
+ggplot(enframe(hnd_e0_2020_dist), aes(x = value)) +
+  geom_density(fill = "coral", alpha = .25) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Analytic Predictive Distribution of e(0)",
+    subtitle = "Honduras, 2020-2025",
+    x = "e(0) (years)",
+    y = "Density"
+  )
+
+```
+
+```{r}
+hnd_e0_2020_tbl <- tibble(
+  Mean = hnd_e0_2020_mean,
+  Median = median(hnd_e0_2020_dist),
+  `2.5% PI` = Mean - 1.96 * hnd_e0_2020_sd,
+  `97.5% PI` = Mean + 1.96 * hnd_e0_2020_sd
+)
+
+knitr::kable(
+  hnd_e0_2020_tbl,
+  booktabs = TRUE, digits = 3, eval = FALSE,
+  caption = "Summary of the predictive distribution of 2020-2025 Honduras $e_0$"
+)
+
+```
+
+
 
 ## _Q2_
 
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+```
+
 ### _Q2.a_
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+
+e0_sim_mcmc <- get.e0.mcmc(e0_sim_dir)
+e0_sim_pred <- get.e0.prediction(e0_sim_dir)
+
+```
+
+Data from a fully converged simulation from a Bayesian model created with
+_BayesLife_ are loaded using the functions `get.e0.mcmc()` and
+`get.e0.prediction()`. `get.e0.mcmc()` returns an object containing each MCMC
+chain from the simulation, and `get.e0.prediction()` returns an object
+containing the summary statistics of the projections created using an input set
+of MCMC chains.
+
 ### _Q2.b_
+
+**Double logistic curve fits for Algeria and Morocco:**
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+e0.DLcurve.plot(e0_sim_mcmc, country = "Algeria")
+e0.DLcurve.plot(e0_sim_mcmc, country = "Morocco")
+
+```
+
+From these double logistic curve fits, we see that both countries reach their
+peak 5-year gains around when life expectancy at birth is 60 years, though
+Algeria has a higher expected 5-year gains on average than Morocco for a given
+$e_0$. Morocco also has a wider probability interval for $e_0$ above 70.
+
 ### _Q2.c_
+
+```{r}
+
+# Question 2c -------------------------------------------------------------
+
+e0_traj_tbl <- list(Algeria = "Algeria", Morocco = "Morocco") %>%
+  purrr::map(~e0.trajectories.table(e0_sim_pred, country = .x)) %>%
+  purrr::map(~as_tibble(.x, rownames = "year")) %>%
+  bind_rows(.id = "country") %>%
+  mutate(year = as.integer(year) - 3) %>%
+  filter(year < 2015) %>%
+  select(country, `Period start` = year, median) %>%
+  pivot_wider(names_from = country, values_from = median)
+
+e0_traj_mean_tbl <- e0_traj_tbl %>%
+  pivot_longer(-`Period start`, names_to = "Country", values_to = "e0") %>%
+  group_by(Country) %>%
+  mutate(gain = lead(e0) - e0) %>%
+  summarise(`Mean Gain` = mean(gain, na.rm = TRUE)) %>%
+  arrange(desc(`Mean Gain`))
+
+```
+
+Looking at the double-logistic plots, it appears that Algeria has been
+experiencing faster increases in life expectancy at birth, as reported by the
+larger average predicted gains at all values of $e_0$. We can confirm this by
+examining the reported life expectancies for each country from 1950 to 2015:
+
+```{r}
+knitr::kable(
+  e0_traj_tbl,
+  booktabs = TRUE, digits = 3, eval = FALSE,
+  caption = "$e_0$ for Algeria and Morocco, 1950-2015"
+)
+```
+
+Again, it appears Algeria has a faster increase. We can verify this by
+calculating the mean gain over time for each country:
+
+```{r}
+knitr::kable(
+  e0_traj_mean_tbl,
+  booktabs = TRUE, digits = 3, eval = FALSE,
+  caption = "Mean gains in $e_0$ over 1950-2015 for Algeria and Morocco"
+)
+```
+
+which confirms the previous two observations.
+
 ### _Q2.d_
+
+```{r}
+
+# Question 2d -------------------------------------------------------------
+
+e0_dza_traj <- get.e0.trajectories(e0_sim_pred, "Algeria")[-1, ]
+e0_mar_traj <- get.e0.trajectories(e0_sim_pred, "Morocco")[-1, ]
+
+dza_gt_mar_each <- rowMeans(e0_dza_traj > e0_mar_traj)
+dza_gt_mar_all <- mean(apply(e0_dza_traj > e0_mar_traj, 2, all))
+
+dza_gt_mar_each_tbl <- tibble(
+  period_start = as.integer(names(dza_gt_mar_each)) - 3,
+  prob_dza_higher = dza_gt_mar_each
+)
+
+```
+
+Assuming gains in life expectancy are independent between countries, we can find
+the probability of Algeria having a higher average life expectancy at birth than
+Morocco in each future period by calculating the mean number of times Algeria
+has a higher $e_0$ than Morocco across all simulations:
+
+```{r}
+knitr::kable(
+  dza_gt_mar_each_tbl,
+  booktabs = TRUE, digits = 3, eval = FALSE,
+  col.names = c("Period start", "Pr(DZA > MAR)"),
+  caption = "Probability of Algeria having a higher average $e_0$ in each future period"
+)
+```
+
+Similarly, we can find the probability of $e_0$ being higher in Algeria than
+Morocco in all future periods by finding the fraction of simulations where this
+condition is met, which in this case is **`r round(dza_gt_mar_all, 3)`**.
+
 
 ## _Q3_
 
+```{r}
+
+# Question 3 --------------------------------------------------------------
+
+# Run this once to get pop predictions
+
+# pop_sim_pred <- pop.predict(
+#   end.year = 2100, start.year = 1950, present.year = 2020, wpp.year = 2019,
+#   output.dir = pop_sim_dir,
+#   inputs = list(
+#     tfr.sim.dir = tfr_sim_dir,
+#     e0F.sim.dir = e0_sim_dir,
+#     e0M.sim.dir = "joint_"
+#   ),
+#   nr.traj = 50,
+#   keep.vital.events = FALSE
+# )
+
+pop_sim_pred <- get.pop.prediction(pop_sim_dir)
+
+```
+
 ### _Q3.a_
+
+```{r}
+
+# Question 3a -------------------------------------------------------------
+
+# Defined using `?pop.expressions`
+over65_exp <- "PCAN[14:27]"
+support_exp <- "PCAN[5:13] / PCAN[14:27]"
+
+```
+
+Using our converged life expectancy at birth and total fertility rate (from
+homework 5) simulations, we can create probabilistic projections of the
+following population quantities:
+
+_Note that the "Potential Support Ratio" is defined as
+$\frac{\text{people aged 20-64}}{\text{people aged 65 and over}}$_
+
+
+```{r}
+pop.trajectories.plot(
+  pop_sim_pred, "Canada",
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Canada Total Population"
+)
+
+pop.trajectories.plot(
+  pop_sim_pred, "Canada",
+  sex = "male",
+  sum.over.ages = TRUE,
+  main = "Canada Total Male Population"
+)
+
+pop.trajectories.plot(
+  pop_sim_pred, "Canada",
+  expression = over65_exp,
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Canada Total Population over 65"
+)
+
+pop.trajectories.plot(
+  pop_sim_pred, "Canada",
+  expression = support_exp,
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Canada Potential Support Ratio"
+)
+```
+
+Looking at the projections of potential support ratio, we see continued
+declines into the future, though eventually at a slower rate. This indicates
+Canada's age structure is likely to continue shifting to older ages.
+
+
 ### _Q3.b_
+
+```{r}
+
+# Question 3b -------------------------------------------------------------
+
+# pop_agg_n_am <- pop.aggregate(pop_sim_pred, regions = 905)
+pop_agg_n_am <- get.pop.aggregation(pop_sim_dir)
+
+pop.trajectories.plot(pop_agg_n_am, 905, sum.over.ages = TRUE)
+
+```
+
+We can also aggregate the projected population simulations from multiple
+countries to get the probabilistic population projection of a region, like
+North America.
+
 
 ## _Q4_
 
+```{r}
+
+# Question 4 --------------------------------------------------------------
+
+can_mig <- readr::read_csv(mig_file) %>%
+  filter(Location == "Canada") %>%
+  transmute(year = MidPeriod - 3, cnmr = CNMR) %>%
+  filter(year < 2020)
+
+```
+
 ### _Q4.a_
+
+```{r}
+
+# Question 4a -------------------------------------------------------------
+
+knitr::kable(
+  can_mig,
+  booktabs = TRUE, digits = 3,
+  col.names = c("Period start", "CNMR"),
+  caption = "Crude net migration rate (CNMR) for Canada, 1950-2100"
+)
+
+```
+
 ### _Q4.b_
+
+```{r}
+
+# Question 4b -------------------------------------------------------------
+
+can_mig_ar_model <- arima(can_mig$cnmr, order = c(1, 0, 0), method = "ML")
+
+can_mig_ar_tbl <- tibble(
+  param = c("AR(1) Param", "Mean"),
+  value = can_mig_ar_model$coef,
+  se = sqrt(diag(vcov(can_mig_ar_model)))
+)
+
+```
+
+
 ### _Q4.c_
+
+```{r}
+
+# Question 4c -------------------------------------------------------------
+
+can_r_2015 <- can_mig %>% filter(year == 2015) %>% pull(cnmr)
+can_mu <- can_mig_ar_model$coef[[2]]
+can_phi <- can_mig_ar_model$coef[[1]]
+
+can_r_2020_mean <- can_phi * (can_r_2015 - can_mu) + can_mu
+can_r_2020_sd <- sqrt(can_mig_ar_model$sigma2)
+
+can_r_2020_dist <- qnorm(
+  seq(.0005, .9995, .001),
+  mean = can_r_2020_mean,
+  sd = can_r_2020_sd
+)
+
+ggplot(enframe(can_r_2020_dist), aes(x = value)) +
+  geom_density(fill = "coral", alpha = .25) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Analytic Predictive Distribution of Crude Net Migration Rate",
+    subtitle = "Canada, 2020-2025",
+    x = "Crude Net Migration Rate",
+    y = "Density"
+  )
+
+```
+
+
 ### _Q4.d_
+
+```{r}
+
+# Question 1d -------------------------------------------------------------
+
+can_r_2020_sample <- rnorm(1000, mean = can_r_2020_mean, sd = can_r_2020_sd)
+
+can_r_2020_tbl <-
+  tibble(
+    Analytic = can_r_2020_dist,
+    Sample = can_r_2020_sample
+  ) %>%
+  pivot_longer(everything(), names_to = "dist", values_to = "value")
+
+ggplot(can_r_2020_tbl, aes(x = value, fill = dist)) +
+  geom_histogram(
+    data = filter(can_r_2020_tbl, dist == "Sample"),
+    aes(y = ..density..),
+    binwidth = .5,
+    alpha = .5
+  ) +
+  geom_density(
+    data = filter(can_r_2020_tbl, dist == "Analytic"),
+    alpha = .2
+  ) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predictive Distributions of Crude Net Migration Rate (Analytic and Sample)",
+    subtitle = "Canada, 2020-2025",
+    x = "Crude Net Migration Rate",
+    y = "Density",
+    fill = "Type"
+  )
+
+```
+
 ### _Q4.e_
+
+```{r}
+
+# Question 4e -------------------------------------------------------------
+
+can_mig_num_full <- readr::read_csv(can_mig_num_file) %>%
+  select(age_group = `Age group`, sex = `Sex`, type = `Type of migrant`, value = `VALUE`) %>%
+  pivot_wider(names_from = "type", values_from = "value") %>%
+  mutate(
+    net_mig = `Immigrants` - `Emigrants`,
+    sex = case_when(
+      sex == "Males"      ~ "male",
+      sex == "Females"    ~ "female",
+      sex == "Both sexes" ~ "both",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  select(-`Immigrants`, -`Emigrants`)
+
+can_mig_prop_both <- can_mig_num_full %>%
+  filter(sex == "both") %>%
+  select(-sex) %>%
+  mutate(prop_mig = net_mig / sum(net_mig)) %>%
+  extract(age_group, into = "age_group_start", regex = "(\\d+)", convert = TRUE)
+
+```
+
 ### _Q4.f_
+
+```{r}
+
+# Question 1f -------------------------------------------------------------
+
+
+```
+
+
 ### _Q4.g_
 
 
