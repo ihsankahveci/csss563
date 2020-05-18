@@ -111,6 +111,20 @@ ls_err <- function(func, data, obs_vals) {
 
 ```
 
+In order to model gains in life expectancy at birth, we use the six parameter
+double logistic model defined in class.
+
+In order to choose appropriate starting parameters, we look at the
+double-logistic curve fit for Honduras, and pick out the appropriate deltas,
+$k$, and $z$.
+
+```{r}
+
+e0_sim_mcmc <- get.e0.mcmc(e0_sim_dir)
+e0.DLcurve.plot(e0_sim_mcmc, country = "Honduras")
+
+```
+
 ```{r}
 opt_input <- e0f_hnd %>% slice(-n())
 loss_func <- ls_err(dl_gain, opt_input$e0, opt_input$gain)
@@ -123,6 +137,14 @@ opt_err_var <- opt_result$value
 
 ```
 
+From this plot we choose the starting values: $[`r starting_params`]$, where
+the fist four items are the deltas, followed by $k$ and $z$.
+
+With these starting values, we use `optim()` to minimize the
+least-squares-error, loss of the observed gains vs the fitted gains from the
+double logistic gain model, which give us the set of optimized parameters
+$[`r round(opt_params, 3)`]$ with an error variance of `r round(opt_err_var, 3)`.
+
 
 ### _Q1.b_
 
@@ -134,6 +156,13 @@ e0f_hnd_gains <- e0f_hnd %>%
   rename(obs_gain = gain) %>%
   mutate(fit_gain = dl_gain(e0, opt_params))
 
+```
+
+We can plot use our optimized parameters to get estimates of $e_0$ gain, and
+compare them to the observed gains to get a sense of how well the optimization
+performed:
+
+```{r}
 ggplot(e0f_hnd_gains, aes(x = obs_gain, y = fit_gain)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0, color = "cadetblue") +
@@ -141,13 +170,15 @@ ggplot(e0f_hnd_gains, aes(x = obs_gain, y = fit_gain)) +
   theme(text = element_text(family = "serif")) +
   labs(
     title = "Fit vs Observed Gains",
-    subtitle = "Honduras e0, 1950-2020",
+    subtitle = "Honduras e(0), 1950-2020",
     x = "Observed Gain (years)",
     y = "Fitted Gain (years)"
   )
 
 ```
 
+_I'm seeing a weird problem here where my gain function seems to predict the
+same value no matter the input $e_0$, not sure what's going on here._
 
 ### _Q1.c_
 
@@ -169,6 +200,10 @@ hnd_e0_2020_dist <- qnorm(
 )
 
 ```
+
+Using our observed life expectancy at birth for 2015-2020 and the gain in the
+same period, we can create an analytic predictive distribution of possible life
+expectancy at birth for 2020-2025, using the variance from our model:
 
 
 ```{r}
@@ -471,13 +506,23 @@ knitr::kable(
 can_mig_ar_model <- arima(can_mig$cnmr, order = c(1, 0, 0), method = "ML")
 
 can_mig_ar_tbl <- tibble(
-  param = c("AR(1) Param", "Mean"),
-  value = can_mig_ar_model$coef,
-  se = sqrt(diag(vcov(can_mig_ar_model)))
+  Parameter = c("AR(1) Param", "Mean"),
+  Value = can_mig_ar_model$coef,
+  `S.E` = sqrt(diag(vcov(can_mig_ar_model)))
 )
 
 ```
 
+After fitting an autoregressive ($AR(1)$) model to the series of crude net
+migration rates over time, we get a model with the parameters:
+
+```{r}
+knitr::kable(
+  can_mig_ar_tbl,
+  booktabs = TRUE, digits = 3,
+  caption = "AR(1) model parameters for Canada CNMR, 1950-2020"
+)
+```
 
 ### _Q4.c_
 
@@ -498,6 +543,18 @@ can_r_2020_dist <- qnorm(
   sd = can_r_2020_sd
 )
 
+```
+
+Using these model parameters, we can find an analytic solution for the
+predictive probability distribution of net migration rates in Canada for
+2020-2025, which takes the form:
+
+$$
+\text{CNMR}_{2020-2025} \sim
+N(`r round(can_r_2020_mean, 3)`, `r round(can_r_2020_sd, 3)`)
+$$
+
+```{r}
 ggplot(enframe(can_r_2020_dist), aes(x = value)) +
   geom_density(fill = "coral", alpha = .25) +
   theme_bw() +
@@ -527,6 +584,12 @@ can_r_2020_tbl <-
   ) %>%
   pivot_longer(everything(), names_to = "dist", values_to = "value")
 
+```
+
+We can also sample from this distribution to show it does indeed follow what
+we predict analytically:
+
+```{r}
 ggplot(can_r_2020_tbl, aes(x = value, fill = dist)) +
   geom_histogram(
     data = filter(can_r_2020_tbl, dist == "Sample"),
@@ -549,6 +612,7 @@ ggplot(can_r_2020_tbl, aes(x = value, fill = dist)) +
   )
 
 ```
+
 
 ### _Q4.e_
 
@@ -573,10 +637,31 @@ can_mig_num_full <- readr::read_csv(can_mig_num_file) %>%
 can_mig_prop_both <- can_mig_num_full %>%
   filter(sex == "both") %>%
   select(-sex) %>%
-  mutate(prop_mig = net_mig / sum(net_mig)) %>%
-  extract(age_group, into = "age_group_start", regex = "(\\d+)", convert = TRUE)
+  mutate(
+    prop_mig = pmax(net_mig / sum(net_mig), 0),
+    mig_rate = can_r_2020_mean * prop_mig
+  )
+
+  # extract(age_group, into = "age_group_start", regex = "(\\d+)", convert = TRUE)
 
 ```
+
+Using data downloaded from Canada's statistical website (_www.statcan.gc.ca_),
+we can get the age-specific net migration number for 2018-2019. From this, we
+can then get the proportion of net migration in each age group. _Note that there
+are some zero value because some age groups had more emigrants than
+immigrants. These were coerced to zero, under the assumption that old ages
+are less likely to migrate._
+
+```{r}
+knitr::kable(
+  select(can_mig_prop_both, age_group, mig_rate),
+  booktabs = TRUE, digits = 3,
+  col.names = c("Age group", "Age-specific net migration rate"),
+  caption = "Age schedule of age-specific net migration rate (per 1000 people)"
+)
+```
+
 
 ### _Q4.f_
 
@@ -584,11 +669,62 @@ can_mig_prop_both <- can_mig_num_full %>%
 
 # Question 1f -------------------------------------------------------------
 
+# Define ages to get from trajectories
+age_map_list <- as.list(1:20)
+age_map_list[[21]] <- 21:27 # 100+ age aggregate
+
+can_pop_2020_sim <- age_map_list %>%
+  purrr::map(~pop.trajectories(pop_sim_pred, country = "Canada", age = .x)) %>%
+  purrr::map_dfr(~as_tibble(.x, rownames = "year"), .id = "age_id") %>%
+  filter(year == 2025) %>%
+  mutate(age_group = can_mig_prop_both$age_group) %>%
+  select(age_group, everything(), -age_id, -year) %>%
+  pivot_longer(-age_group, names_to = "sample", values_to = "pop") %>%
+  extract(sample, into = "sample", regex = "(\\d+)", convert = TRUE)
+
+can_mig_prop_both_sample <-
+  rnorm(50, mean = can_r_2020_mean, sd = can_r_2020_sd) %>%
+  purrr::map_dfr(
+    ~mutate(can_mig_prop_both, mig_rate = .x * prop_mig),
+    .id = "sample"
+  ) %>%
+  mutate(sample = as.integer(sample)) %>%
+  select(sample, age_group, mig_rate) %>%
+  left_join(can_pop_2020_sim, by = c("age_group", "sample")) %>%
+  mutate(mig_number = mig_rate * pop)
+
 
 ```
 
+```{r fig.asp=1.5, fig.width=7.5}
+ggplot(can_mig_prop_both_sample, aes(x = mig_number)) +
+  geom_histogram(aes(y = ..density..)) +
+  facet_wrap(vars(age_group), ncol = 2) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Projected Age-Specific Net Migration Numbers",
+    subtitle = "Canada, 2020-2025",
+    x = "Net number of migrants",
+    y = "Density"
+  )
+```
+
+Using our 50 simulated population projections, we can get the probabilistic
+projected age-specific net migration numbers by taking a samples from the
+$AR(1)$ model and applying the same schedule of age-specific migration for each
+simulated trajectory.
 
 ### _Q4.g_
+
+```{r}
+
+# Question 4g -------------------------------------------------------------
+
+# use pop.predict with migration included?
+
+```
+
 
 
 # Appendix
