@@ -272,8 +272,13 @@ of MCMC chains.
 
 # Question 2b -------------------------------------------------------------
 
-e0.DLcurve.plot(e0_sim_mcmc, country = "Algeria")
-e0.DLcurve.plot(e0_sim_mcmc, country = "Morocco")
+e0.DLcurve.plot(e0_sim_mcmc, "Algeria",
+  predictive.distr = TRUE, pi = c(80, 95), ylim = c(-2, 8)
+)
+
+e0.DLcurve.plot(e0_sim_mcmc, "Morocco",
+  predictive.distr = TRUE, pi = c(80, 95), ylim = c(-2, 8)
+)
 
 ```
 
@@ -290,8 +295,7 @@ $e_0$. Morocco also has a wider probability interval for $e_0$ above 70.
 
 e0_traj_tbl <- list(Algeria = "Algeria", Morocco = "Morocco") %>%
   purrr::map(~e0.trajectories.table(e0_sim_pred, country = .x)) %>%
-  purrr::map(~as_tibble(.x, rownames = "year")) %>%
-  bind_rows(.id = "country") %>%
+  purrr::map_dfr(~as_tibble(.x, rownames = "year"), .id = "country") %>%
   mutate(year = as.integer(year) - 3) %>%
   filter(year < 2015) %>%
   select(country, `Period start` = year, median) %>%
@@ -342,32 +346,44 @@ e0_dza_traj <- get.e0.trajectories(e0_sim_pred, "Algeria")[-1, ]
 e0_mar_traj <- get.e0.trajectories(e0_sim_pred, "Morocco")[-1, ]
 
 dza_gt_mar_each <- rowMeans(e0_dza_traj > e0_mar_traj)
-dza_gt_mar_all <- mean(apply(e0_dza_traj > e0_mar_traj, 2, all))
+dza_lt_mar_each <- rowMeans(e0_dza_traj < e0_mar_traj)
 
-dza_gt_mar_each_tbl <- tibble(
+dza_gt_mar_all <- mean(apply(e0_dza_traj > e0_mar_traj, 2, all))
+dza_lt_mar_all <- mean(apply(e0_dza_traj < e0_mar_traj, 2, all))
+
+dza_mar_prob_each_tbl <- tibble(
   period_start = as.integer(names(dza_gt_mar_each)) - 3,
-  prob_dza_higher = dza_gt_mar_each
+  prob_dza_higher = dza_gt_mar_each,
+  prob_dza_lower = dza_lt_mar_each
 )
 
 ```
 
 Assuming gains in life expectancy are independent between countries, we can find
-the probability of Algeria having a higher average life expectancy at birth than
-Morocco in each future period by calculating the mean number of times Algeria
-has a higher $e_0$ than Morocco across all simulations:
+the probability of Algeria having either a higher or loweraverage life
+expectancy at birth than Morocco in each future period by calculating the mean
+number of times Algeria has a higher (or lower) $e_0$ than Morocco across all
+simulations:
 
 ```{r}
 knitr::kable(
-  dza_gt_mar_each_tbl,
+  dza_mar_prob_each_tbl,
   booktabs = TRUE, digits = 3, eval = FALSE,
-  col.names = c("Period start", "Pr(DZA > MAR)"),
+  col.names = c("Period start", "Pr(DZA > MAR)", "PR(DZA < MAR)"),
   caption = "Probability of Algeria having a higher average $e_0$ in each future period"
 )
 ```
 
-Similarly, we can find the probability of $e_0$ being higher in Algeria than
-Morocco in all future periods by finding the fraction of simulations where this
-condition is met, which in this case is **`r round(dza_gt_mar_all, 3)`**.
+Similarly, we can find the probability of $e_0$ either being higher or lower in
+Algeria than Morocco in all future periods by finding the fraction of
+simulations where each condition is met:
+
+$$
+\begin{aligned}
+Pr(\text{DZA} > \text{MAR}) &= `r round(dza_gt_mar_all, 3)` \\
+Pr(\text{DZA} < \text{MAR}) &= `r round(dza_lt_mar_all, 3)`
+\end{aligned}
+$$
 
 
 ## _Q3_
@@ -649,16 +665,16 @@ can_mig_prop_both <- can_mig_num_full %>%
 Using data downloaded from Canada's statistical website (_www.statcan.gc.ca_),
 we can get the age-specific net migration number for 2018-2019. From this, we
 can then get the proportion of net migration in each age group. _Note that there
-are some zero value because some age groups had more emigrants than
-immigrants. These were coerced to zero, under the assumption that old ages
-are less likely to migrate._
+are zero values because some age groups had more emigrants than immigrants.
+These were coerced to zero, under the assumption that old ages are less likely
+to migrate._
 
 ```{r}
 knitr::kable(
   select(can_mig_prop_both, age_group, mig_rate),
   booktabs = TRUE, digits = 3,
-  col.names = c("Age group", "Age-specific net migration rate"),
-  caption = "Age schedule of age-specific net migration rate (per 1000 people)"
+  col.names = c("Age group", "Net migration rate"),
+  caption = "Age schedule of net migration rate (per 1000 people)"
 )
 ```
 
