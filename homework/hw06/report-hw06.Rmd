@@ -282,10 +282,12 @@ e0.DLcurve.plot(e0_sim_mcmc, "Morocco",
 
 ```
 
-From these double logistic curve fits, we see that both countries reach their
-peak 5-year gains around when life expectancy at birth is 60 years, though
-Algeria has a higher expected 5-year gains on average than Morocco for a given
-$e_0$. Morocco also has a wider probability interval for $e_0$ above 70.
+While the overlap of the predictive intervals for both countries suggest that we
+can't make strong conclusions about the real difference in female gains in life
+expectancy, we do observe that both countries reach their peak 5-year gains
+around when life expectancy at birth is 60 years. According to the median,
+Algeria has a higher expected 5-year gains on average than Morocco for any given
+$e_0$. Also, Morocco also has a wider probability interval for $e_0$ above 70.
 
 ### _Q2.c_
 
@@ -319,7 +321,7 @@ examining the reported life expectancies for each country from 1950 to 2015:
 knitr::kable(
   e0_traj_tbl,
   booktabs = TRUE, digits = 3, eval = FALSE,
-  caption = "$e_0$ for Algeria and Morocco, 1950-2015"
+  caption = "Female $e_0$ for Algeria and Morocco, 1950-2015"
 )
 ```
 
@@ -330,7 +332,7 @@ calculating the mean gain over time for each country:
 knitr::kable(
   e0_traj_mean_tbl,
   booktabs = TRUE, digits = 3, eval = FALSE,
-  caption = "Mean gains in $e_0$ over 1950-2015 for Algeria and Morocco"
+  caption = "Mean gains in female $e_0$ over 1950-2015 for Algeria and Morocco"
 )
 ```
 
@@ -370,7 +372,8 @@ knitr::kable(
   dza_mar_prob_each_tbl,
   booktabs = TRUE, digits = 3, eval = FALSE,
   col.names = c("Period start", "Pr(DZA > MAR)", "PR(DZA < MAR)"),
-  caption = "Probability of Algeria having a higher average $e_0$ in each future period"
+  caption = paste("Probability of Algeria having a higher average female $e_0$",
+                  "in each future period")
 )
 ```
 
