@@ -37,10 +37,312 @@ library(tigris)
 
 ## _Q1_
 
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+```
+
+### _Q1.a_
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+bbox_florida <- c(-87.586670, 24.256982, -79.735108, 30.983104)
+
+# Collect Tweets
+# streamed_tweets_florida <- stream_tweets(
+#   q = bbox_florida,
+#   timeout = (60 * 60 * 8),
+#   parse = FALSE,
+#   file_name = "data/rtweet_stream_florida.json",
+# )
+#
+# tweet_tbl <- parse_stream("data/rtweet_stream_florida.json")
+# saveRDS(tweet_tbl, "data/tweet_stream_florida_parsed.RDS")
+
+tweet_tbl <- readRDS("data/tweet_stream_florida_parsed.RDS")
+
+
+```
+
+This report focuses on collecting Twitter data from Florida. The bounding
+box used to encompass Florida is $(`r round(bbox_florida, 3)`)$, created using
+[bboxfinder.com][http://bboxfinder.com/].
+
+### _Q1.b_
+
+```{r}
+
+# Question 1b -------------------------------------------------------------
+
+num_tweets <- nrow(tweet_tbl)
+
+time_span_hr <- difftime(
+  max(tweet_tbl$created_at), min(tweet_tbl$created_at),
+  units = "hours"
+  ) %>%
+  as.numeric() %>%
+  round(digits = 1)
+
+```
+
+After streaming tweets from Florida for around `r time_span_hr` hours,
+**`r num_tweets`** were collected. We can inspect the distribution of these
+collected tweets in a time series plot:
+
+```{r}
+ts_plot(tweet_tbl, by = "1 minutes") +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Number of Streamed Tweets over Time",
+    subtitle = paste("Location: Florida, Duration:", time_span_hr, "hours"),
+    x = "Time (UTC)",
+    y = "Tweets (count)"
+  )
+
+```
+
+The periods of zero tweets are likely a result of connection issues when
+collecting data, and not representative of the true frequency of tweets.
+
+
 ## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+```
+
+### _Q2.a_
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+
+# Load US Census API key
+CENSUS_API_KEY <- readRDS("~/.uscensus_api_key.RDS")
+census_api_key(CENSUS_API_KEY)
+
+```
+
+_Got a census key!_
+
+### _Q2.b_
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+fla_counties <-
+  get_acs(
+    geography = "county",
+    variables = c("Total Population" = "B01001_001"),
+    year = 2018,
+    state = "Florida",
+    geometry = FALSE,
+    survey = "acs1"
+  ) %>%
+  tidyr::separate(NAME, c("county", "state"), sep = ", ") %>%
+  mutate(county = stringr::str_remove(county, " County")) %>%
+  rename(geoid_county = GEOID, population = estimate) %>%
+  select(county, state, geoid_county, population)
+
+```
+
+
+From the _American Community Survey_, we get total population estimates for
+all counties within Florida:
+
+```{r}
+knitr::kable(
+  fla_counties, booktabs = TRUE,
+  col.names = c("County", "State", "GEOID", "Pop. estimate"),
+  caption = "Florida counties and total population estimated by ACS1 2018"
+)
+
+```
+
+### _Q2.c_
+
+```{r}
+
+# Question 2c -------------------------------------------------------------
+
+```
+
+Estimated total populations of Florida counties can also be visualized:
+
+```{r}
+ggplot(fla_counties, aes(x = county, y = population / 1000)) +
+  geom_col() +
+  theme_bw() +
+  theme(
+    text = element_text(family = "serif"),
+    axis.text.x.bottom = element_text(angle = 45, hjust = 1),
+    panel.grid.major.x = element_blank()
+  ) +
+  labs(
+    title = "Distribution of Population across Florida",
+    subtitle = "ACS1 2018 Population",
+    x = "County",
+    y = "Total Population (1000s of people)"
+  )
+
+```
+
+_Note: I tried to use a map here, but had issues adding the geometry information
+to the data._
 
 ## _Q3_
 
+```{r}
+
+# Question 3 --------------------------------------------------------------
+
+```
+
+### _Q3.a_
+
+```{r}
+
+# Question 3a -------------------------------------------------------------
+
+tweet_lat_lon_tbl <- tweet_tbl %>%
+  rtweet::lat_lng() %>%
+  rename(lon = lng) %>%
+  select(lat, lon)
+
+```
+
+Latitude and Longitude information can be extracted from the collected tweet
+data with `rtweet:lat_lng()`, which uses all geolocation information in a tweet
+to get a coordinate pair. This poses an issue if a twitter user has their
+location turned off, or manually set to a location different from where they are
+when using Twitter. Using all the geolocation information also means looking at
+the bounding box of the tweet, which may overlap with the area of interest, but
+not truly be in the area of interest.
+
+We can solve the issue of tweet coming from other locations by subsetting our
+data, but it is difficult to avoid the issue of capturing tweets where the
+location is manually set to be within our region of interest.
+
+### _Q3.b_
+
+```{r}
+
+# Question 3b -------------------------------------------------------------
+
+# Make function that won't fail when finding GEOIDs for all lat/lon pairs
+safe_geolocator <- purrr::possibly(tigris::call_geolocator_latlon, NA_character_)
+
+# Takes a while to run, so save results
+# tweet_lat_lon_tbl %>%
+#   purrr::pmap_chr(safe_geolocator) %>%
+#   saveRDS("data/block_geoids.RDS")
+
+block_geoids <- readRDS("data/block_geoids.RDS")
+
+geocode_tweets <- tweet_tbl %>%
+  rtweet::lat_lng() %>%
+  rename(lon = lng) %>%
+  mutate(
+    geoid_block = block_geoids,
+    geoid_county = substr(geoid_block, 1, 5)
+  ) %>%
+  left_join(fla_counties, by = "geoid_county") %>%
+  filter(state == "Florida")
+
+num_dropped <- num_tweets - nrow(geocode_tweets)
+pct_dropped <- (num_dropped / num_tweets) * 100
+
+```
+
+After adding GEOID data to the tweets, **`r num_dropped`** tweets outside of
+Florida were dropped (`r round(pct_dropped, 1)`%).
+
+### _Q3.c_
+
+```{r}
+
+# Question 3c -------------------------------------------------------------
+
+grouped_tweets <- geocode_tweets %>%
+  group_by(county, population) %>%
+  summarise(tweets = n())
+
+```
+
+With our tweets tagged with the appropriate county-level GEOID, we can
+investigate how many tweets are associated with each county:
+
+```{r}
+knitr::kable(
+  grouped_tweets, booktabs = TRUE,
+  col.names = c("County", "Pop. Estimate", "Tweet Count"),
+  caption = "Number of collected tweets geo-coded to each Florida county"
+)
+```
+
+
+### _Q3.d_
+
+```{r}
+
+# Question 3d -------------------------------------------------------------
+
+tweet_model <- lm(tweets ~ population, data = grouped_tweets)
+
+model_tbl <- tweet_model %>%
+  broom::tidy() %>%
+  left_join(
+    confint(tweet_model) %>% as_tibble(rownames = "term"),
+    on = "term"
+  ) %>%
+  select(-statistic)
+
+```
+
+To ascertain the association between the number of tweets originating from a
+county and the county's population, we fit the simple linear model
+
+$$ lm(\text{tweets} \sim \text{population}) $$
+which yields the parameters:
+
+```{r}
+knitr::kable(
+  model_tbl, booktabs = TRUE, digits = 4,
+  col.names = c("Term", "Estimate", "Std. Error", "P-value", "2.5% CI", "97.5% CI"),
+  caption = "Summary of model fitting the association between tweets and population"
+)
+
+```
+
+We can also visualize the model:
+
+```{r}
+ggplot(grouped_tweets, aes(x = population / 1000, y = tweets)) +
+  geom_point(alpha = .7) +
+  geom_smooth(method = "lm") +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Number of Tweets vs Population",
+    subtitle = "Florida Counties",
+    x = "Total Population Estimate (1000s of people)",
+    y = "Tweets (count)"
+  )
+```
+
+From the data and model, we can say that there is a statistically significant
+relationship between the population of a county and the number of tweets from
+a county. Removing the few extreme values from the data would significantly
+change this relationship, however, so maybe there are some underlying factors
+this model doesn't capture (such as tourists coming to Miami and tweeting, but
+not being counted as part of the population).
 
 # Appendix
 
