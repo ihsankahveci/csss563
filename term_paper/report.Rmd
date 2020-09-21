@@ -11,10 +11,11 @@ output:
     toc: true
     toc_depth: 2
     number_sections: true
-abstract: "\\singlespacing `r paste0(readLines('abstract.txt'), collapse=' ')` \\newpage"
 fontsize: 12pt
 geometry: margin=1in
 papersize: letter
+urlcolor: blue
+abstract: "\\singlespacing `r paste0(readLines('abstract.txt'), collapse=' ')` \\newpage"
 header-includes:
   - \usepackage{setspace}
   - \onehalfspacing
@@ -37,16 +38,572 @@ options(knitr.kable.NA = '-')
 # Prep work ---------------------------------------------------------------
 
 # Load libraries
+library(dplyr)
+library(tidyr)
+library(dembase)
 library(ggplot2)
 
 # Data
+eng_conc <- readRDS("data/britmort/conc.rds") %>%
+  as_tibble() %>%
+  rename(district = lad, region = rgn) %>%
+  filter(!district %in% c("Cornwall", "Isles of Scilly"))
+
+eng_deaths <- readRDS("data/britmort/deaths.rds") %>% as_tibble()
+eng_pop <- readRDS("data/britmort/popn.rds") %>% as_tibble()
+eng_combined <- eng_pop %>%
+  left_join(eng_deaths, by = c("age", "sex", "region")) %>%
+  rename(population = count.x, deaths = count.y, district = region) %>%
+  mutate(mx = deaths / population) %>%
+  right_join(eng_conc, by = "district") %>%
+  pivot_longer(
+    cols = population:mx,
+    names_to = "variable",
+    values_to = "count"
+  ) %>%
+  extract(age, into = "age_start", remove = FALSE, convert = TRUE)
+
+phl_combined <-
+  readRDS("data/combined/phl_2015_all.RDS") %>%
+  select(-age_group_years_start) %>%
+  rename(age = age_group_name) %>%
+  mutate(mx = deaths / population) %>%
+  pivot_longer(
+    cols = deaths:mx,
+    names_to = "variable",
+    values_to = "count"
+  ) %>%
+  extract(age, into = "age_start", remove = FALSE, convert = TRUE)
+
+eng_modeled <- readRDS("data/britmort/mx_modelled.rds") %>%
+  collapseIterations(FUN = median) %>%
+  as_tibble() %>%
+  extract(age, into = "age_start", remove = FALSE, convert = TRUE) %>%
+  pivot_wider(names_from = variant, values_from = value) %>%
+  mutate(pct_diff = 100 * (None / Benchmarks - 1)) %>%
+  pivot_longer(
+    cols = None:pct_diff,
+    names_to = "variant",
+    values_to = "value"
+  )
+
+phl_modeled <- readRDS("data/results/model_mx_both.RDS") %>%
+  collapseIterations(FUN = median) %>%
+  as_tibble() %>%
+  extract(age, into = "age_start", remove = FALSE, convert = TRUE) %>%
+  pivot_wider(names_from = variant, values_from = value) %>%
+  mutate(pct_diff = 100 * (None / Benchmarks - 1)) %>%
+  pivot_longer(
+    cols = None:pct_diff,
+    names_to = "variant",
+    values_to = "value"
+  )
+
+eng_ex_compare <- readRDS("data/britmort/life_exp_compare.RDS")
+phl_ex_compare <- readRDS("data/results/region_ex_both.RDS")
+
+# Set random samples
+set.seed(6789)
+sample_size <- 10
+
+eng_name_sample <- sample(unique(eng_combined$district), sample_size)
+phl_name_sample <- sample(unique(phl_combined$province), sample_size)
 
 ```
 
+```{r}
+# Helper functions --------------------------------------------------------
+
+plot_mx <- function(data, ...) {
+  ggplot(data, aes(...)) +
+    geom_point(alpha = .5) +
+    geom_line(alpha = .5) +
+    theme_classic() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom"
+    )
+}
+
+plot_ex <- function(data, ...) {
+  ggplot(data, aes(...)) +
+    geom_point(alpha = .5) +
+    theme_classic() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom"
+    )
+}
+
+```
+
+
 # Article Summary
+
+As the need for estimates of small areas defined by social, demographic, and
+geographic variables increases, so too does the need for methods overcoming the
+difficulties of small area estimations. Due to unreliability from small sample
+sizes in these areas, model-based estimates are preferred over direct methods
+(i.e., calculating a rate by taking number of events over exposure). These small
+area estimates are frequently compared to aggregate estimates for larger areas
+that are more easily likely obtained using direct methods (referred to as
+*benchmarks*). Small area estimation is important to government statistical
+offices, where reported statistics are used to inform policy and financial
+decisions. Inconsistencies between the low level and aggregate estimates
+therefore cause varying degrees of concern depending on the application, so
+small area estimates are often adjusted to be consistent with aggregate
+estimates (referred to as *benchmarking*). Currently existing benchmarking
+methods use benchmarks as constraints in the small area estimation models, but
+are limited to only providing point estimates for small area parameters.
+
+In their article *Fully Bayesian Benchmarking of Small Area Estimation Models
+(2020, Zhang, J.L. and Bryant, J.),* Zhang and Bryant propose, implement, and
+demonstrate a fully Bayesian general approach to benchmarking. Their approach
+produces a full benchmarked posterior distribution by taking benchmarks as
+estimates for underlying aggregate parameters and modifying the likelihood
+function by multiplying it by the probability distribution of the benchmarks.
+Benefits of this approach include the ability to use multiple benchmarks,
+benchmarks nonlinearly related to small area estimates, and to specify
+acceptable discrepancy between benchmarks and model-based estimates.
+
+Throughout the article and this report, some terminology is just that may not be
+immediately clear, so brief definitions are provided here for reference:
+
+- **Benchmarks** are aggregate (higher level) estimates, generally obtained
+  using direct methods
+  - **Internal benchmarks** are calculated from the small area data
+    sources
+  - **External benchmarks** are calculated from sources separate from the
+    small area data
+
+- **Benchmarking** methods are techniques for reconciling small area
+  estimates with benchmarks
+  - **Exact benchmarking** requires the aggregated small area estimates to
+    exactly match their benchmark
+  - **Inexact benchmarking** allows some maximum degree of difference
+    between the aggregated areas and the benchmark
+
 # Methods Analysis & Implementation
+
+## Overview
+
+The authors' methods are based on a conceptual framework that starts with a
+standard setup for Bayesian estimation of area-level models. The goal is to
+estimate area-level parameters
+$\gamma = \left\{ \gamma_{1},\ldots,\ \gamma_{n} \right\}^{T}$ from area-level
+observations $y = \left\{ y_{1},\ldots,\ y_{n} \right\}^{T}$ for the $n$
+areas defined by unique classification groupings (such as age-sex-region). The
+hierarchical Bayesian model then becomes:
+
+$$
+p\left( \gamma,\ \phi \middle| y \right) \propto p(\phi)p(\gamma|\phi)p(y|\gamma)
+$$
+
+with $\phi$ representing a vector of hyperparameters, likelihood
+$p(y|\gamma)$, and prior $p(\phi)p(\gamma|\phi)$.
+
+Extending this framework to include benchmarking requires collecting a set of
+observed benchmarks $m = \left\{ m_{1},\ldots,\ m_{d} \right\}^{T}$ estimating
+underlying parameters $\psi = \left\{ \psi_{1},\ \ldots,\ \psi_{d} \right\}^{T}$
+for $d \ll n$ areas defined by unique aggregate classification groupings (such
+as age-sex, or age-sex-location where location includes multiple regions). A
+deterministic benchmarking function $\psi = f(\gamma)$ is defined to set the
+relationship between the small area and benchmark parameters so that each small
+area belongs to at most one benchmark area. This benchmarking function does not
+have to be linear -- the later evaluations benchmark small area mortality rate
+estimates against life expectancy at birth.
+
+To measure agreement with the benchmarks, a probability distribution for the
+benchmarks conditional on the aggregate parameters is defined as:
+
+$$
+p^{\left\lbrack m \right|\psi\rbrack}\left( m \middle| \psi \right) = p^{\left\lbrack m \middle| \psi \right\rbrack}(m|f\left( \gamma \right))
+$$
+
+This is distribution is then multiplied with the original likelihood to
+produce:
+
+$$
+p\left( y \middle| \gamma \right)p^{\left\lbrack m \middle| \psi \right\rbrack}(m|f\left( \gamma \right))
+$$
+
+This modified likelihood represents a compromise between the original
+likelihood and the benchmarking requirements, where values of $\gamma$
+yielding larger
+$p^{\left\lbrack m \middle| \psi \right\rbrack}(m|f\left( \gamma \right))$
+inflate the original likelihood.
+
+With this revised likelihood, the benchmarked posterior distribution becomes:
+
+$$
+p\left( \gamma,\ \phi \middle| y \right) \propto p(\phi)p(\gamma|\phi)p\left( y \middle| \gamma \right)p^{\left\lbrack m \middle| \psi \right\rbrack}(m|f\left( \gamma \right))
+$$
+
+Under exact benchmarking, $p^{\lbrack m|\psi\rbrack}$ simplifies to $1$
+when $m = f\left( \gamma \right) = \psi$ and $0$ otherwise. For inexact
+benchmarking, $p^{\lbrack m|\psi\rbrack}$ takes the form of whatever
+distribution fits the desired definition. One simple case is allowing
+differences within a given tolerance $\alpha$, where
+$p^{\lbrack m|\psi\rbrack}$ would then become:
+
+$$
+m_{j} \sim N(\psi_{j},\ \alpha^{2})
+$$
+The authors implement these Bayesian hierarchical models using MCMC
+Metropolis-Hastings algorithm.
+
+## Limitations
+
+One point the authors make is the difference between the effects of internal
+and external benchmarking on model performance. Generally, external benchmarking
+will improve model performance over no benchmarking if
+$p^{\lbrack m|\psi\rbrack}$ is correctly specified or not. Internal
+benchmarking, on the other hand, will hurt performance if
+$p^{\lbrack m|\psi\rbrack}$ is correctly specified, since small area data is
+used twice. However, a misspecified model is more common, which makes it
+possible for inexact benchmarking to improve performance, though this is not
+certain and depends on the details of the data.
+
 # Methods Evaluation
+
+## Replication
+
+```{r}
+eng_summary_tbl <- eng_combined %>%
+  filter(variable != "mx") %>%
+  group_by(variable) %>%
+  summarise(
+    n = length(unique(district)),
+    missing = sum(is.na(count)),
+    min = min(count),
+    `25%` = quantile(count, .25),
+    median = median(count),
+    mean = mean(count),
+    `75%` = quantile(count, .75),
+    max = max(count)
+  )
+
+eng_n_dis <- length(unique(eng_combined$district))
+eng_n_reg <- length(unique(eng_combined$region))
+
+eng_total_pop <- eng_combined %>%
+  filter(variable == "population") %>%
+  pull(count) %>%
+  sum()
+
+eng_total_deaths <- eng_combined %>%
+  filter(variable == "deaths") %>%
+  pull(count) %>%
+  sum()
+
+```
+
+Part one of the methods evaluation is to recreate the application presented in
+the authors' article: estimating age-sex-specific mortality rates in 2014 for
+local authority districts (LAD) in England and Wales, using as benchmarks
+sex-specific life expectancies at birth for regions. The data for this analysis
+is death counts and populations at risk for 20 age groups 0-90+, each sex, and
+348 LADs.
+
+```{r}
+knitr::kable(
+  eng_summary_tbl, booktabs = TRUE, digits = 2,
+  caption = "Summary statistics for England and Wales LADs"
+)
+```
+
+There are `r eng_total_deaths` total deaths among a total population of `r eng_total_pop`.
+We can directly estimate mortality rates for each LAD, `r sample_size` of which are presented here:
+
+```{r}
+eng_combined %>%
+  filter(
+    variable == "mx",
+    district %in% eng_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = log(count), color = sex) +
+  facet_wrap(vars(district)) +
+  labs(
+    title = "Log Mortality Rate vs Age",
+    subtitle = "Direct estimates, England and Wales",
+    x = "Age group year start",
+    y = "log(mx)"
+  )
+```
+
+These direct estimates are generally noisy below age 60, suggesting the amount
+of data at the small area level is not sufficient for accurate results.
+
+The authors let $y_{\text{asd}}$ represent observed death counts are each age
+($a$), sex ($s$), and district ($d$). With $\gamma_{\text{asd}}$ as the
+true underlying mortality rate and $w_{\text{asd}}$ the corresponding
+population at risk, they apply the model:
+
+$$y_{\text{asd}} \sim Poisson\left( w_{\text{asd}}\gamma_{\text{asd}} \right)$$
+$$\log\left( \gamma_{\text{asd}} \right) \sim N(\beta^{0} + \beta_{a}^{\text{age}} + \beta_{s}^{\text{sex}} + \beta_{d}^{\text{dis}} + \beta_{\text{as}}^{age:sex},\ \sigma^{2})$$
+
+Age effects are assumed to follow a random walk with drift:
+
+$$\beta_{a}^{\text{age}} \sim t_{4}\left( \eta_{a}^{\text{age}},\tau_{\text{age}}^{2} \right)$$
+$$\eta_{0}^{\text{age}} \sim N\left( 0,\ 10^{2} \right)$$
+$$\eta_{a}^{\text{age}} \sim N\left( \eta_{a - 1}^{\text{age}} + \delta_{a - 1}^{\text{age}},\ \omega^{2} \right),\ \ \ \ a > 0$$
+$$\delta_{0}^{\text{age}} \sim N\left( 0,\ 1 \right)$$
+$$\delta_{a}^{\text{age}} \sim N\left( \delta_{a - 1}^{\text{age}},\ \varphi^{2} \right),\ \ \ \ a > 0$$
+
+The sex effect has a normal prior $\beta_{s}^{\text{sex}} \sim N(0,\ 1)$, the
+district effect has a normal prior
+$\beta_{d}^{\text{dis}} \sim N(0,\ \tau_{\text{dis}}^{2})$ with a weakly
+informative half-t prior on the standard deviation
+$\tau_{\text{dis}} \sim t_{7}^{+}\left( 0,1 \right)$, and the interaction term
+has a normal prior $\beta_{\text{as}}^{age:sex} \sim N(0,\ \tau_{age:sex}^{2})$
+with a weakly informative half-t prior on the standard deviation
+$\tau_{age:sex} \sim t_{7}^{+}\left( {0,0.5}^{2} \right)$. All of the standard
+deviation terms have $t_{7}^{+}\left( 0,1 \right)$ priors.
+
+These mortality estimate are benchmarked to sex-specific life expectancy at
+birth at the 10 region levels (one administrative unit up from an LAD)
+encompassing the 348 LADs. If $z_{\text{asr}}$ is age-sex-region mortality
+rates, then our benchmarking function, $f_{\text{life}}$, is defined as:
+
+$$m_{\text{sr}} = f_{\text{life}}(z_{1sr},\ \ldots,\ z_{\text{Asr}})$$
+
+Where $A = 20$ is the number of age groups. Life expectancies are normally
+reported to two decimal places, so the authors incorporate inexact benchmarking
+allowing a discrepancy of $0.01$. Agreement with the benchmark is then:
+
+$$m_{\text{sr}} \sim N(\psi_{\text{sr}},\ {0.005}^{2})$$
+
+The authors fit this model twice, with and without benchmarking, using four
+independent chains with 40,000 iterations plus 40,000 burn in. Thinning is set
+to 80 so 1,600 draws are sampled from the posterior distribution.
+
+After fitting both models, we see that benchmarking increases the agreement
+between modeled life expectancy at birth and the regional benchmarks, as
+compared to the non-benchmarked model:
+
+```{r}
+eng_ex_compare %>%
+  plot_ex(x = value, y = factor(region), shape = variant) +
+  facet_wrap(vars(sex)) +
+  labs(
+    title = "Life Expectancy at Birth by Region",
+    subtitle = "England and Wales",
+    x = "Life expectancy at birth (years)",
+    y = "",
+    shape = "Model"
+  )
+```
+
+At the LAD level, we can examine the difference between the benchmarked and
+non-benchmarked models for a sample of LADs:
+
+```{r}
+eng_modeled %>%
+  filter(
+    variant == "pct_diff",
+    region %in% eng_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = value, color = sex) +
+  facet_wrap(vars(region)) +
+  labs(
+    title = "Percent Difference between Benchmarked and non-Benchmarked Models",
+    subtitle = "England and Wales",
+    x = "Age group year start",
+    y = "% Difference"
+  )
+```
+
+While there are differences between the models, generally that difference stays
+within 4%. Finally, we look at the modeled mortality rates for the same LADs we
+included direct estimates of, showing that the model does also has the effect of
+producing smoother mortality trends.
+
+
+```{r}
+eng_modeled %>%
+  filter(
+    variant == "Benchmarks",
+    region %in% eng_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = log(value), color = sex) +
+  facet_wrap(vars(region)) +
+  labs(
+    title = "Log Mortality Rate vs Age",
+    subtitle = "Benchmark model estimates, England and Wales",
+    x = "Age group year start",
+    y = "log(mx)"
+  )
+```
+
+## Extension
+
+```{r}
+phl_summary_tbl <- phl_combined %>%
+  filter(variable != "mx") %>%
+  group_by(variable) %>%
+  summarise(
+    n = length(unique(province)),
+    missing = sum(is.na(count)),
+    min = min(count, na.rm = TRUE),
+    `25%` = quantile(count, .25, na.rm = TRUE),
+    median = median(count, na.rm = TRUE),
+    mean = mean(count, na.rm = TRUE),
+    `75%` = quantile(count, .75, na.rm = TRUE),
+    max = max(count, na.rm = TRUE)
+  )
+
+phl_n_prv <- unique(length(phl_combined$province))
+phl_n_reg <- unique(length(phl_combined$region))
+
+phl_total_pop <- phl_combined %>%
+  filter(variable == "population") %>%
+  pull(count) %>%
+  sum(na.rm = TRUE)
+
+phl_total_deaths <- phl_combined %>%
+  filter(variable == "deaths") %>%
+  pull(count) %>%
+  sum(na.rm = TRUE)
+
+
+```
+
+To further evaluate the authors' methods, I applied their same analysis to
+estimate age-sex-specific mortality rates in 2015 for Philippine provinces,
+using as benchmarks sex-specific life expectancies at birth for regions. The
+data for this analysis is death counts and populations at risk for 18 age groups
+0-80+, each sex, and 81 provinces.
+
+```{r}
+knitr::kable(
+  phl_summary_tbl, booktabs = TRUE, digits = 2,
+  caption = "Summary statistics for Philippines Provinces"
+)
+```
+
+There are `r phl_total_deaths` total deaths among a total population of `r phl_total_pop`. We can directly
+estimate mortality rates for each province, five of which are presented here:
+
+```{r}
+phl_combined %>%
+  filter(
+    variable == "mx",
+    province %in% phl_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = log(count), color = sex) +
+  facet_wrap(vars(province)) +
+  labs(
+    title = "Log Mortality Rate vs Age",
+    subtitle = "Direct estimates, Philippines",
+    x = "Age group year start",
+    y = "log(mx)"
+  )
+```
+
+Similar to the authors' analysis, I let $y_{\text{asp}}$ represent observed
+death counts are each age ($a$), sex ($s$), and province ($p$). With
+$\gamma_{\text{asp}}$ as the true underlying mortality rate and
+$w_{\text{asp}}$ the corresponding population at risk, I define the model:
+
+$${y_{\text{asp}} \sim Poisson\left( w_{\text{asp}}\gamma_{\text{asp}} \right)
+}{\log\left( \gamma_{\text{asp}} \right) \sim N(\beta^{0} + \beta_{a}^{\text{age}} + \beta_{s}^{\text{sex}} + \beta_{p}^{\text{prv}} + \beta_{\text{as}}^{age:sex},\ \sigma^{2})}$$
+
+Age effects are assumed to follow a random walk analogous to the original
+analysis, with other effects and standard errors also being equivalent.
+
+The mortality estimates are again benchmarked to regional sex-specific life
+expectancies at birth for the 16 regions encompassing all of the provinces. A
+benchmarking function $f_{\text{life}}$ is defined as:
+
+$$m_{\text{sr}} = f_{\text{life}}(z_{1sr},\ \ldots,\ z_{\text{Asr}})$$
+
+With $A = 18$ age groups and $z_{\text{asr}}$ age-sex-region morality
+rates. Life expectancies are normally reported to two decimal places, so the I
+again incorporate inexact benchmarking allowing a discrepancy of $0.01$:
+
+$$m_{\text{sr}} \sim N(\psi_{\text{sr}},\ {0.005}^{2})$$
+
+I also fit this model twice, with and without benchmarking, using four
+independent chains with 40,000 iterations plus 40,000 burn in. Thinning is set
+to 80 so 1,600 draws are sampled from the posterior distribution.
+
+After fitting both models, we see that benchmarking has almost no effect on the
+agreement between modeled life expectancy at birth and the regional benchmarks,
+as compared to the non-benchmarked model, except for in the *Autonomous Region
+in Muslim Mindanao*:
+
+
+```{r}
+phl_ex_compare %>%
+  plot_ex(x = value, y = factor(location), shape = variant) +
+  facet_wrap(vars(sex)) +
+  labs(
+    title = "Life Expectancy at Birth by Region",
+    subtitle = "Philipppines",
+    x = "Life expectancy at birth (years)",
+    y = "",
+    shape = "Model"
+  )
+```
+
+Comparing the models at the province level also shows almost no difference
+between the benchmarked and non benchmarked model, except for a few outlier
+points:
+
+```{r}
+phl_modeled %>%
+  filter(
+    variant == "pct_diff",
+    location %in% phl_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = value, color = sex) +
+  facet_wrap(vars(location)) +
+  labs(
+    title = "Percent Difference between Benchmarked and non-Benchmarked Models",
+    subtitle = "Philippines",
+    x = "Age group year start",
+    y = "% Difference"
+  )
+```
+
+Though the directly estimated mortality rates were smoother than that of
+England and Wales, the model still does smooth the trend more.
+
+```{r}
+phl_modeled %>%
+  filter(
+    variant == "Benchmarks",
+    location %in% phl_name_sample
+  ) %>%
+  plot_mx(x = age_start, y = log(value), color = sex) +
+  facet_wrap(vars(location)) +
+  labs(
+    title = "Log Mortality Rate vs Age",
+    subtitle = "Benchmark model estimates, Philippines",
+    x = "Age group year start",
+    y = "log(mx)"
+  )
+```
+
 # Discussion
+
+Between these two evaluations, there were some noticeable difference. The
+England and Wales analysis used almost 3 times as many geographic small areas
+and 2 more age groups, and a smaller population size than the Philippines
+analysis. I think this contributed to Philippines having smoother direct
+estimates than England and Wales, and the general lack of difference in
+performance between the benchmarked and non-benchmarked Philippines model.
+
+Despite these difference, the methods presented by the authors did behave as
+expected to produce small area estimates that agreed at a higher level, and were
+able to produce smoother trends more indicative of the likely underlying
+mortality parameters.
+
+One general limitation of their methodology is that areas that track data on
+smaller levels are more likely to have robust data collection systems, reducing
+the need for benchmarking in the first place. These methods seem ideal in the
+case where a location has poorer collection systems, but still collects data at
+a more granular level.
 
 \newpage
 
@@ -54,12 +611,16 @@ library(ggplot2)
 
 ## References
 
-Zhang, J.L. and Bryant, J. (2020). [Fully Bayesian Benchmarking of Small Area
-Estimation Models][1]. _Journal of Official Statistics_ 36:197-223
+Zhang, J.L. and Bryant, J. (2020).
+[Fully Bayesian Benchmarking of Small Area Estimation Models][article].
+_Journal of Official Statistics_ 36:197-223
 
-[1]: https://content.sciendo.com/view/journals/jos/36/1/article-p197.xml
+Philippines Statistics Authority. [Philippines Vital Statistics System - Deaths
+2015][PSAVSS].
 
 ## Code
+
+### Report
 
 ```{r getlabels, include=FALSE}
 labs <- knitr::all_labels()
@@ -68,3 +629,37 @@ labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
 
 ```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
 ```
+
+### Philippines Mortality Estimation Analysis
+
+**Prepare Data**
+
+```{r code=readLines("scripts/01_prep_data.R"), eval=FALSE, echo=TRUE}
+```
+
+**Calculate Direct Estimates**
+
+```{r code=readLines("scripts/02_direct_estimates.R"), eval=FALSE, echo=TRUE}
+```
+
+**Fit Models**
+
+```{r code=readLines("scripts/03_fit_models.R"), eval=FALSE, echo=TRUE}
+```
+
+**Compare Regions**
+
+```{r code=readLines("scripts/04_compare_regions.R"), eval=FALSE, echo=TRUE}
+```
+
+
+### England and Wales Mortality Estimation Analysis
+
+The Authors' analysis of age-sex-specific mortality rates for local authority
+districts in England and Wales, using as benchmarks sex-specific life
+expectancies for regions, was recreated exactly running the code provided on
+[GitHub][britmort], and has thus been omitted from this report.
+
+[article]: https://content.sciendo.com/view/journals/jos/36/1/article-p197.xml
+[PSAVSS]: https://psa.gov.ph/content/vital-statistics-report-vsr
+[britmort]: https://github.com/bayesiandemography/britmort
