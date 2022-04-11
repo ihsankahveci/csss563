@@ -1,0 +1,258 @@
+---
+title: "Homework 01"
+author: "Spencer Pease"
+date: "4/6/2020"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+# Questions
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+
+# Load libraries
+library(dplyr)
+library(ggplot2)
+
+# Make data
+age_range <- c(0, 110)
+age_data <- tibble(age = seq(age_range[1], age_range[2], .1))
+
+```
+
+
+## _Q1_
+
+For a given force of mortality function, $\mu(x)$, the cumulative hazard
+is defined as the total area under the curve of $\mu(x)$ bounded on the interval
+$[0, x]$, or put another way:
+
+$$ \Lambda(x) = \int_0^x \mu(u) du $$
+For the force of mortality function $\mu(x) = 0.005 + 0.0005(x - 15)^2$, the
+cumulative hazard function is then:
+
+$$
+\begin{aligned} \Lambda(x) &= \int_{0}^{x} \mu(u) du \\
+&= \int_{0}^{x} \left[0.005 + 0.0005(u - 15)^2 \right]du \\
+&= 0.005x + 0.0005 \int_0^x \left(u^2 - 30u + 225\right)du \\
+&= 0.005x + 0.0005 \left. \left( \frac{1}{3}u^3 - 15u^2 + 225u \right) \right|_0^x \\
+&= 0.005x + 0.0005 \left( \frac{1}{3}x^3 - 15x^2 + 225x \right) \\
+&= \frac{1}{2000}\left( \frac{1}{3}x^3 - 15x^2 + 235x \right)
+\end{aligned}
+$$
+
+
+
+For ages `r age_range[1]` to `r age_range[2]`, this cumulative hazard functions
+looks like:
+
+```{r question-1}
+
+# Question 1 --------------------------------------------------------------
+
+hazard_fun <- function(x) 0.005 + 0.0005 * (x − 15)^2
+cum_hazard_fun <- function(x) .0005 * ((x^3 / 3) - (15 * x^2) + (235 * x))
+
+chf_plot <- ggplot(age_data, aes(x = age, y = cum_hazard_fun(age))) +
+  geom_line() +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Cumulative Hazard vs Age",
+    x = "Age (years)",
+    y = "Cumulative Hazard"
+  )
+
+chf_plot
+
+```
+
+
+## _Q2_
+
+The survival function, $S(x)$, is defined as the exponentiated negative
+cumulative hazard function, $e^{-\Lambda(x)}$. Using our calculated cumulative
+hazard function, the survival function is then:
+
+$$
+S(x) =
+\text{exp}\left[
+\frac{-1}{2000}\left( \frac{1}{3}x^3 - 15x^2 + 235x \right)
+\right]
+$$
+
+For ages `r age_range[1]` to `r age_range[2]`, the survival function then looks
+like:
+
+```{r question-2}
+
+# Question 2 --------------------------------------------------------------
+
+survival_fun <- function(x) exp(-1 * cum_hazard_fun(x))
+
+survf_plot <- ggplot(age_data, aes(x = age, y = survival_fun(age))) +
+  geom_line() +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Survival vs Age",
+    x = "Age (years)",
+    y = "Survival Probability"
+  )
+
+survf_plot
+
+```
+
+
+## _Q3_
+
+The probability density function of $X$, $f(x)$, is the negative derivative of
+the survival function with respect to x, $f(x) = -\frac{dS(x)}{dx}$. Using our
+calculated survival function, the probability density function of $X$ is then:
+
+$$
+\begin{aligned} f(x) &= \frac{-d}{dx}
+\text{exp}\left[\frac{-1}{2000}\left( \frac{1}{3}x^3 - 15x^2 + 235x \right) \right] \\
+&= \frac{1}{2000} \frac{d}{dx}\left( \frac{1}{3}x^3 - 15x^2 + 235x \right) S(x) \\
+&= \frac{1}{2000} \left( x^2 - 30x + 235 \right) S(x) \\
+&= \mu(x)S(x)
+\end{aligned}
+$$
+
+For ages `r age_range[1]` to `r age_range[2]`, the probability density function
+looks like:
+
+```{r question-3}
+
+# Question 3 --------------------------------------------------------------
+
+pdfun_plot <-
+  ggplot(age_data, aes(x = age, y = survival_fun(age) * hazard_fun(age))) +
+  geom_line() +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Probability density vs Age",
+    x = "Age (years)",
+    y = "Probability density"
+  )
+
+pdfun_plot
+
+```
+
+
+## _Q4_
+
+Assuming an initial cohort size of $100,000$, we can actuate a single year life
+table using our survival function $S(x)$, and by treating $l_x$ as a continuous
+linear function over small intervals.
+
+```{r question-4}
+
+# Question 4 --------------------------------------------------------------
+
+cohort_size <- 100000
+
+lt_data <- tibble(
+  age = 0:50,
+  lx = survival_fun(age) * cohort_size,
+  dx = lx - lead(lx),
+  qx = dx / lx,
+  mx =  dx / (lx - .5 * dx)
+)
+
+lt_names <- c("age", "$l_x$", "$_{1}d_x$", "$_{1}q_x$", "$_{1}m_x$")
+
+knitr::kable(lt_data,
+  booktabs = TRUE,
+  escape = FALSE,
+  digits = c(0, 1, 1, 3, 3),
+  col.names = lt_names,
+  caption = "Cohort life table for single year ages 0 to 50"
+)
+
+```
+
+
+## _Q5_
+
+```{r question-5}
+
+# Question 5 --------------------------------------------------------------
+
+e0 <- integrate(survival_fun, lower = 0, upper = Inf)
+e0_val <- round(e0$value, 3)
+
+```
+
+
+Life expectancy at age $x$, $e_x$, is defined as:
+
+$$e_x = \frac{\int_x^{\infty}S(u)du}{S(x)}$$
+
+which simplifies to $\int_0^{\infty}S(u)du$ for life expectancy at birth, $e_0$.
+Using numerical integration, the life expectancy at birth for our cohort is
+calculated to be **`r e0_val`**.
+
+
+## _Q6_
+
+```{r question-6}
+
+# Question 6 --------------------------------------------------------------
+
+e10 <- integrate(survival_fun, lower = 10, upper = Inf)
+e10_val <- round(e10$value / survival_fun(10), digits = 3)
+
+```
+
+The life expectancy at age 10 ($e_{10}$) for a member of this cohort is
+numerically calculated to be **`r e10_val`**.
+
+
+## _Q7_
+
+The probability that a person aged $x$ dies within the next $n$ years is defined
+as:
+
+$$_{n}q_x = \frac{S(x) - S(x + n)}{S(x)}$$
+
+```{r question-7}
+
+# Question 7 --------------------------------------------------------------
+
+nqx <- function(x, n) (survival_fun(x) - survival_fun(x + n)) / survival_fun(x)
+q15_15 <- round(nqx(15, 15), 3)
+
+```
+
+The $_{15}q_{15}$ value for this cohort is then **`r q15_15`**.
+
+
+# Appendix
+
+```{r getlabels, include=FALSE}
+labs <- knitr::all_labels()
+labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
+```
+
+```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
+```
