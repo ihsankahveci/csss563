@@ -1,5 +1,7 @@
 ### Class-specific files ###
 
+.DS_Store
+/*.DS_Store
 lectures/*.pdf
 demos/
 homework/hw*/data/

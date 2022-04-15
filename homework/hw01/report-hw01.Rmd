@@ -8,7 +8,11 @@ output:
     highlight: tango
     df_print: kable
     fig_caption: yes
+    number_sections: true
 ---
+
+\tableofcontents 
+\newpage 
 
 
 ```{r setup, include=FALSE}
@@ -22,7 +26,6 @@ plot_size=15
 rm(gr)
 ```
 
-# Questions
 
 ```{r prep, include=FALSE}
 
@@ -30,7 +33,7 @@ rm(gr)
 
 # Load libraries
 library(tidyverse, quietly = TRUE)
-
+library(wpp2019)
 
 # Make data
 age_range <- c(0, 110)
@@ -39,17 +42,22 @@ age_data <- tibble(age = seq(age_range[1], age_range[2], .1))
 ```
 
 
-## _Q1_
+# _Q1_
 
-If the instantaneous mortality rate is constant (0.02) -- independent of age --, the probability distribution follows an exponential distribution. Let $x$ equals to age at death; hence the relevant probability density function $f(x)$, cumulative distribution function $F(x)$, survival function $S(x)$: 
+If the instantaneous mortality rate is constant (0.02) --- independent of age, the probability distribution follows an exponential distribution. Let $x$ equals to age at death; hence the relevant probability density function $f(x)$, cumulative distribution function $F(x)$, survival function $S(x)$: 
+
 
 $$
-f(x) = 0.02e^{-0.02x} \\ F(x) = 1-e^{0.02x} \\ S(x) = e^{-0.02x} 
+\begin{aligned}
+f(x) = 0.02e^{-0.02x} \\ 
+F(x) = 1-e^{0.02x} \\ 
+S(x) = e^{-0.02x} 
+\end{aligned}
 $$ 
 
 
 ```{r q1 }
-# Question 1 
+# Question 1 ---------------------------------------------------------------
 pdf = function(x) 0.02*exp(-0.02*x)
 cdf = function(x) 1 - exp(-0.02*x)
 survf = function(x) exp(-0.02*x)
@@ -83,29 +91,32 @@ median_plot =
     )
 ```
 
-### (a)
+
+
+## (a)
 
 Plotting the probability density function:
+
 ```{r}
 pdf_plot
 ```
 
 
-### (b)
+## (b)
 
 Probability that a member of this population is still alive at age 70: $S(70) =$ `r survf(70)`
 
 
-### (c)
+## (c)
 Probability that a member of this population dies before age 6: $F(6) =$ `r cdf(6)` 
 
-### (d)
+## (d)
 Life expectancy at birth for a member of this population: $e_{0} =$ `r 1/0.02`  
 
-### (e) 
+## (e) 
 Life expectancy at age 50 for a member of this population: $e_{50} =$ `r 1/0.02`  
 
-### (f)
+## (f)
 Median age at death for this population: $S(50) =$ `r survf(34)`
 
 ```{r}
@@ -113,10 +124,10 @@ median_plot
 ```
 
 
-## _Q2_
+# _Q2_
 
 ```{r q2}
-# Question 2
+# Question 2 ---------------------------------------------------------------
 hazard_fun = function(x) (0.0168*x^2 - 0.668*x + 8)/1000
 
 hazard_plot = 
@@ -181,10 +192,10 @@ e10 <- integrate(survival_fun, lower = 10, upper = Inf)
 e10_val <- round(e10$value / survival_fun(10), digits = 3)
 
 nqx <- function(x, n) (survival_fun(x) - survival_fun(x + n)) / survival_fun(x) 
-q15_15 <- round(nqx(15, 15), 3)
+q45_15 <- round(nqx(15, 45), 3)
 ```
 
-### (a)
+## (a)
 
 For ages `r age_range[1]` to `r age_range[2]`, this mortality rate plot
 looks like:
@@ -194,7 +205,7 @@ hazard_plot
 ```
 
 
-### (b)
+## (b)
 
 For a given instantaneous mortality function $\mu(x) = (0.0168x^2 − 0.668x + 8)/1000$, defined as the total area under the curve of $\mu(x)$ bounded on the interval $[0, x]$, or put another way:
 
@@ -214,8 +225,6 @@ chf_plot
 ```
 
 
-## _Q2_
-
 The survival function, $S(x)$, is defined as the exponentiated negative
 cumulative hazard function, $e^{-\Lambda(x)}$. Using our calculated cumulative
 hazard function, the survival function is then:
@@ -227,14 +236,15 @@ S(x) =
 \right]
 $$
 
-### (c)
+## (c)
 For ages `r age_range[1]` to `r age_range[2]`, the survival function then looks
 like:  
 
 ```{r}
 surv_plot
 ```
-### (d)
+
+## (d)
 
 The probability density function of $X$, $f(x)$, is the negative derivative of
 the survival function with respect to x, $f(x) = -\frac{dS(x)}{dx}$. Using our
@@ -250,10 +260,11 @@ looks like:
 
 ```{r}
 pdfun_plot
+
 ```
 
 
-### (e)
+## (e)
 
 
 Life expectancy at age $x$, $e_x$, is defined as:
@@ -265,22 +276,237 @@ Using numerical integration, the life expectancy at birth for our cohort is
 calculated to be **`r e0_val`**.
 
 
-### (e)
+## (f)
 
 The life expectancy at age 10 ($e_{10}$) for a member of this cohort is
 numerically calculated to be **`r e10_val`**.
 
 
-### (f)
+## (g)
 
 The probability that a person aged $x$ dies within the next $n$ years is defined
 as:
 
 $$_{n}q_x = \frac{S(x) - S(x + n)}{S(x)}$$
-The $_{15}q_{15}$ value for this cohort is then **`r q15_15`**.
+The $_{45}q_{15}$ value for this cohort is then **`r q45_15`**.
 
 
-# Appendix
+# _Q3_
+
+## (a) & (b)
+
+$$ _nd_x = l_x - l_{x+n}$$
+
+```{r}
+# Question 3 ---------------------------------------------------------------
+## download estimates of males
+data("popM")
+
+peru = 
+  popM %>%
+  filter(name == "Peru") %>%
+  filter(age == c("70-74", "75-79", "80-84", "85-89", "90-94", "95-99", "100+")) %>%
+  select(age, "2015", "2020") %>%
+  mutate(ndx = `2015` - lead(`2020`)) %>%
+  filter(age != "100+") 
+
+
+
+
+peru %>%
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "UN Prospects for Peru")
+
+```
+
+
+
+# _Q4_
+
+## (a) 
+
+$$_nM_x = \frac{_nd_x}{_nL_x}$$
+```{r}
+# Question 4 ---------------------------------------------------------------
+peru_LT =
+  peru %>%
+  mutate(nLx = (5*(`2015`+`2020`)/2)) %>%
+  mutate(nMx = ndx/nLx) 
+  
+peru_LT %>% 
+ knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "UN Life Table for Peru")
+  
+```
+
+## (b)
+
+$$ 
+\begin{aligned}
+\text{Solution 1:} \\ 
+_nq_x \approx 1 - e^{-_nM_x} \\
+\text{   }\\
+\text{Solution 2:} \\
+_nq_x \approx \frac{n_nM_x}{1 + n_nM_x/2}
+\end{aligned}
+$$
+\newpage 
+
+```{r}
+## first method
+peru_LT %>%
+ mutate(nqx = 1-exp(-5*nMx)) %>%
+ knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "First Method", 
+              col.names=c("age", "2015", "2020", "$_nd_x$", "$_nL_x$", "$_nM_x$", "$_nq_x$"))
+
+
+## second method
+peru_LT %>%
+  mutate(nqx = (5*nMx)/(1+5*nMx/2)) %>%
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "Second Method",
+               col.names=c("age", "2015", "2020", "$_nd_x$", "$_nL_x$", "$_nM_x$", "$_nq_x$"))
+```
+## (c)
+
+$$_nm_x = \frac{_nd_x}{_nL_x} = \frac{_nd_x}{nl_x − 1/2*n_nd_x}$$
+```{r}
+peru_LT %>% 
+  mutate(nLx = 5*`2015`-(1/2)*5*ndx) %>%
+  mutate(nmx = ndx/nLx) %>%
+  select(-nMx) %>%
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "Life Table $_nm_x$", 
+               col.names = c("age", "2015", "2020", "$_nd_x$", "$_nL_x'$", "$_nm_x$"))
+
+```
+
+## (d)
+
+```{r}
+## comparison
+peru_LT %>%
+  mutate(nqx_1 = 1-exp(-5*nMx)) %>%
+  mutate(nqx_2 = (5*nMx)/(1+5*nMx/2)) %>%
+  select(age, nqx_1, nqx_2) %>%
+  knitr::kable(digits = 3, booktabs = TRUE, escape = FALSE,
+               caption = "Comparison", col.names = c("age", "$_nq_x^1$", "$_nq_x^2$"))
+```
+
+As seen from the table above, the estimates from two methods are quite similiar. The difference occurs in later ages because $_nM_x$ becomes larger. I think second method is better because it doesn't assume that mortality rate is constant within the age interval. Instead, it is modeled as a linear function of age. As we move from 5-year age groups to single age groups, this became more important because even two-year age difference matters in later ages. 
+
+
+## (e)
+
+```{r}
+peru_LT %>%
+  mutate(nLx2 = 5*`2015`-(1/2)*5*ndx) %>%
+  mutate(nmx = ndx/nLx2) %>%  
+  select(age, `2015`, ndx, nLx, nLx2, nMx, nmx) %>%
+  knitr::kable(digits = 3, booktabs = TRUE, escape = FALSE,
+               caption = "Comparison: $_nM_x$ and $_nm_x$", 
+               col.names = c("age", "2015", "$_nd_x$", "$_nL_x$", "$_nL_x'$" , "$_nM_x$", "$_nm_x$"))
+
+```
+
+$_nM_x$ uses person-years $(_nL_x)$ assuming mortality rate is constant within 5-year age groups. "$_nm_x$" uses person-years $(_nL_x')$ assuming mortality rate is a linear function of age. As a result, former estimates more person-years because it doesn't take into account the deaths occur within the early years of the age group which happens more in older ages. As expected, $_nM_x$ underestimates mortality rate in older ages comparing to $_nm_x$
+
+\newpage
+# _Q5_
+ 
+ 
+```{r}
+# Question 5 ---------------------------------------------------------------
+## Life Table using first method
+LT_1 = peru_LT %>%
+  mutate(nqx = 1-exp(-5*nMx)) %>%
+  select(age, nqx) %>%
+  mutate(n = 5, npx = 1-nqx) %>%
+  bind_rows(a=list(age="100+", n=5, nqx=1, npx=0))
+
+npx <- LT_1$npx
+
+age <- seq(70,100,5)
+lx <- 10000
+
+for (a in age[-length(age)]) {
+  l <- lx[which(age == a)] * npx[which(age == a)]
+  lx <- c(lx, l)
+}
+
+LT_1 <- LT_1 %>%
+  mutate(
+    x = age,
+    lx = lx,
+    ndx = lx*nqx,
+    Lx = n*lx - n*ndx/2,
+    Tx = rev(Lx) %>% coalesce(0) %>% cumsum() %>% rev(),
+    ex = Tx / lx
+)
+
+## Life Table using second method
+
+LT_2 = peru_LT %>%
+  mutate(nqx = (5*nMx)/(1+5*nMx/2)) %>%
+  select(age, nqx) %>%
+  mutate(n = 5, npx = 1-nqx) %>%
+  bind_rows(a=list(age="100+", n=5, nqx=1, npx=0))
+
+npx <- LT_2$npx
+
+age <- seq(70,100,5)
+lx <- 10000
+
+for (a in age[-length(age)]) {
+  l <- lx[which(age == a)] * npx[which(age == a)]
+  lx <- c(lx, l)
+}
+
+LT_2 <- LT_2 %>%
+  mutate(
+    x = age,
+    lx = lx,
+    ndx = lx*nqx,
+    Lx = n*lx - n*ndx/2,
+    Tx = rev(Lx) %>% coalesce(0) %>% cumsum() %>% rev(),
+    ex = Tx / lx
+)
+```
+
+## (a)
+
+```{r}
+LT_1 %>% 
+  select(-n, -x) %>% 
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "Life Table - First Method", 
+               col.names=c("age", "$_nq_x$", "$_np_x$", "$_nd_x$", "$l_x$", "$L_x$", "$T_x$", "$e_x$"))
+
+
+LT_2 %>%    
+  select(-n, -x) %>% 
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "Life Table - Second Method",
+               col.names=c("age", "$_nq_x$", "$_np_x$", "$_nd_x$", "$l_x$", "$L_x$", "$T_x$", "$e_x$"))
+
+```
+## (b)
+
+```{r}
+LT_1 %>%
+  select(age, ex_1 = ex) %>%
+  cbind(ex_2 = LT_2$ex) %>%
+  knitr::kable(digits = 2, booktabs = TRUE, escape = FALSE,
+               caption = "Life Expectancy Comparison", col.names = c("age", "$e_x^1$", "$e_x^2$" ))
+  
+```
+
+The first approximation method generated slightly higher life expectancies for all ages, except 100+. This happens because the first method estimates lower probability of death ($_nq_x$).
+
+\newpage 
+
+# Code Appendix
 
 ```{r getlabels, include=FALSE}
 labs <- knitr::all_labels()
