@@ -143,7 +143,7 @@ hazard_plot =
     y = "Hazard rate"
     )
 
-cum_hazard_fun <- function(x) x*(14*x^2 - 835*x + 20000)/25000
+cum_hazard_fun <- function(x) x*(14*x^2 - 835*x + 20000)/250000
 
 chf_plot <- 
   ggplot(age_data, aes(x = age, y = cum_hazard_fun(age))) +
@@ -214,7 +214,7 @@ $$
 &= \int_{0}^{x} \left[(0.0168x^2 − 0.668x + 8)/1000 \right]dx \\ 
 &= \int_{0}^{x} \dfrac{21x^2-835x+10000}{1250000}dx\\
 &= \dfrac{21}{125000}\int_{0}^{x}x^2dx - \frac{167}{250000}\int_{0}^{x}xdx + \frac{1}{125}\int_{0}^x1dx \\
-&= \dfrac{x\cdot\left(14x^2-835x+20000\right)}{25000} + C
+&= \dfrac{x\cdot\left(14x^2-835x+20000\right)}{250000} + C
 \end{aligned}
 $$
 For ages `r age_range[1]` to `r age_range[2]`, this cumulative hazard functions
@@ -232,7 +232,7 @@ hazard function, the survival function is then:
 $$
 S(x) =
 \text{exp}\left[
-\dfrac{-x\cdot\left(14x^2-835x+20000\right)}{25000}
+\dfrac{-x\cdot\left(14x^2-835x+20000\right)}{250000}
 \right]
 $$
 
