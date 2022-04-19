@@ -210,6 +210,7 @@ pop_t1 <- pop_leslie %*% pop_t0
 ```
 
 
+
 We can project this population forward using the _cohort-component method of
 population projection_, which states that the age-specific populations one time
 period ahead ($N_{t+1}$) can be calculated from the matrix multiplication of the

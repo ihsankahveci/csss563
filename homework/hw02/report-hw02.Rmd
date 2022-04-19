@@ -349,7 +349,7 @@ matrix, the reproductive value matrix is then $`r write_matex(pop_repv)`$.
 ### _Q2.a_
 
 ```{r}
-# Question 2 --------------------------------------------------------------
+# Question 2 ---------------------------------------------------------------
 ## Question 2a -------------------------------------------------------------
 data(mxF)
 peru_mx <- mxF %>%
@@ -358,11 +358,11 @@ peru_mx <- mxF %>%
 
 # Builds a life table by using the mortality rate 
 peru_LT = 
-  LifeTables::lt.mx(peru_mx$mx, age = peru$age )$lt %>% 
+  LifeTables::lt.mx(peru_mx$mx, age = peru_mx$age)$lt %>% 
   as_tibble() %>%
   mutate(age = 
            paste0(Age, "-", Age + 4) %>% 
-           inset(c(1, 2, length(Age)), c("0", "1-4", "100+")), .before=1)
+           magrittr::inset(c(1, 2, length(Age)), c("0", "1-4", "100+")), .before=1)
 
 peru_mx %>% 
   knitr::kable(
@@ -408,7 +408,9 @@ peru_LT %>%
 # Create standard 5-year age goup npx and nqx mortality
 peru_0_to_5 =peru_LT %>%
   filter(Age < 5) %>%
-  summarise(age = "0-4", npx = prod(npx), nqx = 1 - prod(npx))
+  summarise(age = "0-4", nqx = 1 - prod(npx), npx = prod(npx))
+
+peru_q0 <- peru_0_to_5$nqx[1]
 
 peru_nqx <- peru_LT %>% 
   filter(Age >= 5) %>%
@@ -433,7 +435,11 @@ data(sexRatio)
 data(tfr)
 data(percentASFR)
 
-peru_pop <- popF %>% filter(name == "Peru") %>% select(age, pop = `2015`)
+peru_pop <- popF %>% 
+  filter(name == "Peru") %>% 
+  select(age, pop = `2015`) %>% 
+  mutate(order = row_number())
+
 peru_srb <- sexRatio %>% filter(name == "Peru") %>% pull(`2015-2020`)
 peru_tfr <- tfr %>% filter(name == "Peru") %>% pull(`2015-2020`)
 
@@ -444,22 +450,58 @@ peru_Fx <- percentASFR %>%
   filter(name == "Peru") %>%
   select(age=age, pasfr = `2015-2020`) %>%
   mutate(asfr = pasfr * peru_tfr / 5) %>%
-  right_join(peru_pop, by = "age") %>%
+  right_join(peru_pop, by = "age", ) %>%
   replace_na(list(pasfr = 0, asfr = 0)) %>%
-  left_join(peru_LT, by = "age") %>%
+  left_join(peru_nqx, by = "age") %>%
   mutate(
     f_tilde =
-      asfr_2_f_tilde(asfr, peru_srb, lag(sx), lag(pop), pop, thailand_q0)
+      asfr_2_f_tilde(asfr, peru_srb, lag(npx), lag(pop), pop, peru_q0)
   ) %>%
-  replace_na(list(f_tilde = 0))
+  replace_na(list(f_tilde = 0)) %>%
+  arrange(order) %>%
+  select(-order)
 
+```
+
+To calculate ${}_{5}\tilde{F}_x$, we first use the provided proportional
+age-specific fertility rate and total fertility rate for Peru in 2015 to get
+age-specific fertility rate with the formula:
+
+$$ \frac{TFR[T_1, T_2] \times {}_{n}PASFR_x}{n} = {}_{n}F_x[T_1, T_2] $$
+
+where $n = 5$ and $[T_1, T_2] = [2015, 2020]$. Then we use the provided
+population and previously calculated mortality rates ${}_{5}s_x$ and ${}_{5}q_0$
+to calculate ${}_{5}\tilde{F}_x$ using the formula:
+
+$$
+{}_{n}\tilde{F}_x = {}_{n}F_x \times
+\frac{1}{1 + SRB} \times
+\frac{1}{2} \left( 1 + {}_{n}s_x \frac{{}_{5}N_{x-1,t}}{{}_{5}N_{x,t}} \right) \times
+\left( 1 - \frac{{}_{n}q_0}{2} \right)
+$$
+
+Note that ${}_{5}q_0$ was calculated as $1 - {}_{5}s_0$, which was in turn
+calculated from ${}_{1}s_0 \times {}_{4}s_1$.
+
+With these calculations, our resulting ${}_{5}\tilde{F}_x$ is:
+
+```{r}
+knitr::kable(
+  select(peru_Fx, age, f_tilde, asfr, pop, npx),
+  booktabs = TRUE,
+  col.names =
+    c("Age", "${}_{5}\\tilde{F}_x$", "${}_{5}F_x$", "${}_{5}N_x$", "${}_{5}s_x$"),
+  eval = FALSE,
+  digits = c(0, 3, 3, 0, 3),
+  caption = paste(
+    "Expected number of live female births per woman per five-year period",
+    "in Peru, 2015-2020"
+  )
+)
 ```
 
 
 ### _Q2.c_
-
-The life expectancy at birth is **`r round(thailand_lt$ex[1], 3)`**, and
-the life expectancy at age 10 is **`r round(thailand_lt$ex[4], 3)`**
 
 ### _Q2.d_
 
