@@ -33,8 +33,8 @@ library(tibble)
 library(ggplot2)
 library(MortalityLaws)
 library(demogR)
-library(MortCast)
-library(demography)
+#library(MortCast)
+#library(demography)
 
 # Helper functions
 rmse <- function(x, y) sqrt(mean((x - y)^2))
@@ -47,7 +47,7 @@ tha_mort <- mxF %>%
   filter(name == "Thailand") %>%
   select(-country_code, -name) %>%
   pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
-  extract(period, "year", regex = "(^[:digit:]{4})", convert = TRUE) %>%
+  extract(period, "year", regex = "(^[0-9]{4})", convert = TRUE) %>%
   filter(year < 2020) %>%
   select(year, age, everything()) %>%
   arrange(year, age)
@@ -87,7 +87,7 @@ plot_log_mort <- function(data, ...) {
     ) +
     labs(
       title = "Age-Specific Log Mortality Rates",
-      subtitle = "Thailand, Females, 2015-2020",
+      subtitle = "Peru, Females, 2015-2020",
       x = "Age (years)",
       y = "Log Mortality Rate",
       color = "Model"

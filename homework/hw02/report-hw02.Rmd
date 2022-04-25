@@ -28,11 +28,14 @@ rm(gr)
 
 # Load libraries
 library(tidyverse, quietly = TRUE)
-library(demogR) 
 library(wpp2019)
+library(LifeTables)
+library(demogR)
+library(MortalityLaws)
+library(Metrics)
 
-# Helper functions
-
+# helper functions
+## matrix printing for latex
 write_matex <- function(x, digits = 3) {
   # From: https://stackoverflow.com/a/54088015/8866058
   x <- round(x, digits = digits)
@@ -40,6 +43,7 @@ write_matex <- function(x, digits = 3) {
   paste("\\begin{bmatrix}", paste0(mat_string, collapse = "\\\\"), "\\end{bmatrix}")
 }
 
+## shortcut for matrix multiplication and exponents
 "%^%" <- function(A, n) {
   if (n == 1) {
     A
@@ -48,8 +52,8 @@ write_matex <- function(x, digits = 3) {
   }
 }
 
+## creating a Leslie matrix from fertilty and survival rates
 make_leslie_matrix <- function(f, s) {
-
   if (length(f) != length(s)) {
     stop("f and s must be the same length")
   }
@@ -64,6 +68,24 @@ make_leslie_matrix <- function(f, s) {
   l_mat
 }
 
+## plotting log mortality models
+plot_log_mort <- function(data, ...) {
+  ggplot(data, aes(...)) +
+    geom_point() +
+    geom_line() +
+    theme_bw() +
+    theme(
+      text = element_text(family = "serif", size = 15),
+      legend.position = "bottom"
+    ) +
+    labs(
+      title = "Age-Specific Log Mortality Rates",
+      subtitle = "Peru, Females, 2015-2020",
+      x = "Age (years)",
+      y = "Log Mortality Rate",
+      color = "Model"
+    )
+}
 ```
 
 
@@ -233,7 +255,7 @@ ahead by raising the Leslie matrix to the $k^{\text{th}}$ power ($L^k$). Our
 given population, projected $2$ periods into the future is then:
 
 $$
-\begin{aligned} N_{t+2} &= L^{10} N_t \\
+\begin{aligned} N_{t+2} &= L^{2} N_t \\
 &= `r write_matex(pop_leslie)`^{2} `r write_matex(pop_t0)` \\
 &= `r write_matex(pop_leslie %^% 2)` `r write_matex(pop_t0)` \\
 &= `r write_matex(pop_t2)`
@@ -271,7 +293,7 @@ tfr_eqn_t2 <- paste0(round(pop_asfr_t2, 3), collapse = " + ")
 The crude birth rate for this population from time period 1 to time period 2 is
 **`r round(CBR_t2, 3)`**.
 
-The total fertility rate between time periods 1&2 is $`r tfr_eqn_t2` = $ **`r round(TFR_t2, 3)`** for this population. 
+The total fertility rate between time periods 1&2 is $`r tfr_eqn_t2` = **`r round(TFR_t2, 3)`** for this population. 
 
 ### _Q1.g_
 
@@ -362,7 +384,8 @@ peru_LT =
   as_tibble() %>%
   mutate(age = 
            paste0(Age, "-", Age + 4) %>% 
-           magrittr::inset(c(1, 2, length(Age)), c("0", "1-4", "100+")), .before=1)
+           magrittr::inset(c(1, 2, length(Age)), c("0", "1-4", "100+")), .before=1) %>%
+  mutate(age = as_factor(age))
 
 peru_mx %>% 
   knitr::kable(
@@ -438,7 +461,7 @@ data(percentASFR)
 peru_pop <- popF %>% 
   filter(name == "Peru") %>% 
   select(age, pop = `2015`) %>% 
-  mutate(order = row_number())
+  mutate(row_id = row_number(), .before=1)
 
 peru_srb <- sexRatio %>% filter(name == "Peru") %>% pull(`2015-2020`)
 peru_tfr <- tfr %>% filter(name == "Peru") %>% pull(`2015-2020`)
@@ -458,8 +481,8 @@ peru_Fx <- percentASFR %>%
       asfr_2_f_tilde(asfr, peru_srb, lag(npx), lag(pop), pop, peru_q0)
   ) %>%
   replace_na(list(f_tilde = 0)) %>%
-  arrange(order) %>%
-  select(-order)
+  arrange(row_id) %>%
+  select(-row_id)
 
 ```
 
@@ -503,9 +526,435 @@ knitr::kable(
 
 ### _Q2.c_
 
+```{r}
+peru_leslie <- with(peru_Fx, make_leslie_matrix(f_tilde, npx))
+
+peru_leslie_idx <- which(peru_leslie != 0, arr.ind = TRUE)
+
+peru_leslie_tbl <-
+  peru_leslie_idx %>%
+  as_tibble() %>%
+  mutate(value = peru_leslie[peru_leslie_idx]) %>%
+  arrange(row, col)
+```
+
+Using our calculated ${}_{5}\tilde{F}_x$ and ${}_{5}s_x$, we can build a Leslie
+matrix for this population:
+
+```{r}
+knitr::kable(
+  peru_leslie_tbl,
+  booktabs = TRUE,
+  col.names = c("Row", "Column", "Value"),
+  digits = c(0, 0, 3),
+  caption = "Leslie matrix for Peru females, 2015-2020, (sparse format)"
+)
+```
+
 ### _Q2.d_
 
+```{r}
+# Question 2d -------------------------------------------------------------
+peru_pop_t1 <- peru_leslie %*% matrix(peru_Fx$pop)
+
+```
+
+Using the given female population in Peru, 2015-2020 (_table 3_), we can
+calculate the population one 5-year period ahead to 2020-2025, assuming fertility and
+mortality are constant over time, and that there is no migration.
+
+$$ N_{t+1} = LN_{t} = `r write_matex(matrix(peru_pop_t1), 0)` $$
+
+
 ### _Q2.e_
+
+```{r}
+# Question 2.e -------------------------------------------------------------
+peru_pop_t2 <- (peru_leslie %^% 2) %*% matrix(peru_Fx$pop)
+
+```
+
+Under the same assumptions as the previous question, we can instead project the
+population 10 years (2 time periods) into the future.
+
+$$ N_{t_2} = L^2N_{t} = `r write_matex(matrix(peru_pop_t2), 0)` $$
+
+## _Q3_
+
+### _Q3.a_
+
+```{r}
+# Question 3 -------------------------------------------------------------
+## Net migration is per 1000 person-years
+data(migration)
+
+peru_net_mig <- migration %>%
+  filter(name == "Peru") %>%
+  pull(`2015-2020`)
+
+peru_mig <- peru_pop %>%
+  mutate(
+    mig_rate = (peru_net_mig / 1000) * (pop / sum(pop)),
+    mig_rate_fmt = formatC(mig_rate, digits = 2, format = "e"),
+    mig_num = pop * mig_rate)
+
+```
+
+Under the assumption that the age-specific migration rates follow the same
+distribution as the population distribution, we can calculate age-specific
+migration rates using the provided net migration rate (after converting the rate
+from _migrations per 1,000 person-years_ to _migrant per person-year_).
+
+```{r}
+peru_mig %>%
+  select(age, mig_rate_fmt) %>%
+  knitr::kable(
+  booktabs = TRUE,
+  col.names = c("Age", "${}_{5}G_x$"),
+  eval = FALSE,
+  caption = "Age-specific migration rate in Peru, 2015-2020")
+```
+
+
+### _Q3.b_
+
+```{r}
+# Question 3b -------------------------------------------------------------
+peru_pop_mig_t1 <- `+`(
+  (peru_leslie %*% matrix(peru_mig$pop)),
+  (.5 * (1 + peru_leslie)) %*% matrix(peru_mig$mig_num)
+)
+
+peru_pop_mig_t2 <- (peru_leslie %^% 2) %*% matrix(peru_mig$pop) +  (peru_leslie %^% 2) %*% matrix(peru_mig$mig_num)
+
+peru_pop_mig_tbl <- tibble(
+  age = peru_pop$age,
+  mig_pop_2025 = peru_pop_mig_t1,
+  mig_pop_2030 = peru_pop_mig_t2
+)
+
+
+```
+
+To incorporate migration into the population projection to 2030, I used the
+assumption that all migration happens half-way through a time interval:
+
+$$
+\begin{aligned}
+N_{t+1} &= LN_t + L^{\frac{1}{2}}G_t \\
+&\approx  LN_t + \frac{1}{2}(I + L)G^t
+\end{aligned}
+$$
+and
+
+$$
+\begin{aligned}
+N_{t+2} &= L^2N_t + L^{\frac{2}{2}}G_t \\
+&\approx  L^2N_t + LG^t
+\end{aligned}
+$$
+where $N$ and $G$ refer to female population and migrants, and $I$ is the
+identity matrix. Using this equation, we calculate the with-migration female
+population in 2020 and 2030:
+
+```{r}
+knitr::kable(
+  mutate_if(peru_pop_mig_tbl, is.numeric, round),
+  booktabs = TRUE,
+  col.names = c("Age", "2025", "2030"),
+  caption = "Peru female with-migration population projections"
+)
+```
+
+
+
+
+### _Q3.c_
+
+```{r}
+peru_pop_all_tbl <- peru_pop_mig_tbl %>%
+  mutate(
+    pop_2025 = peru_pop_t1,
+    pop_2030 = peru_pop_t2) %>%
+  select(age, pop_2025, mig_pop_2025, pop_2030, mig_pop_2030)
+
+```
+
+We can compare our population projections for 2020 and 2030 with migration to
+the same projections without migration:
+
+```{r}
+knitr::kable(
+  mutate_if(peru_pop_all_tbl, is.numeric, round),
+  booktabs = TRUE,
+  col.names = c("Age", "2025", "+Mig. 2025", "2030", "+Mig. 2030"),
+  caption = paste(
+    "Comparison of Peru female population projections,",
+    "with and without migration"
+  )
+)
+```
+
+Here we see that the with-migration projections are always larger than the
+without-migration projections, since Peru has a net positive migration
+rate in all age groups (_Table 7_).
+
+
+
+## _Q4_
+
+### _Q4.a_
+
+```{r}
+# Question 4a -------------------------------------------------------------
+model_gompertz2 <- lm(log(nmx) ~ age, data = filter(peru_LT, Age >= 50))
+
+model_gompertz <- with(
+  filter(peru_LT, Age >= 50),
+  MortalityLaws::MortalityLaw(x = Age, mx = nmx, law = "gompertz")
+)
+
+model_makeham <- with(
+  filter(peru_LT, Age >= 50),
+  MortalityLaw(x = Age, mx = nmx, law = "makeham")
+)
+
+coef_gompertz <- coef(model_gompertz)
+coef_makeham <- coef(model_makeham)
+
+```
+
+I used 5-year age groups based on the Life Table extracted in question 2. A log-linear fit applied to each of the models, defined below, along with the estimated model parameters after fitting our
+observed data:
+
+**Gompertz**
+
+$(\alpha, \beta) =$ (`r round(coef_gompertz, 3)`)
+
+$$
+\begin{aligned}
+\mu(x) &= \alpha e^{\beta x} \\
+log[\mu(x)] &= log(\alpha) + \beta x
+\end{aligned}
+$$
+
+
+**Gompertz-Makeham**
+
+$(\alpha, \beta, \gamma) =$ (`r round(coef_makeham, 4)`)
+
+$$
+\begin{aligned}
+\mu(x) &= \gamma + \alpha e^{\beta x} \\
+log[\mu(x) - \gamma] &= log(\alpha) + \beta x
+\end{aligned}
+$$
+
+_Note: both of these models were fit using the MortalityLaws package, optimizing
+the function $log^2(\frac{est.}{obs.})$._
+
+
+### _Q4.b_
+
+```{r}
+
+# Question 4b -------------------------------------------------------------
+
+peru_LT_model <- peru_LT %>%
+  rename(obs_qx = nqx, obs_mx = nmx) %>%
+  mutate(
+    Gompertz = predict(model_gompertz, x = Age),
+    Makeham = predict(model_makeham, x = Age)
+  ) %>%
+  select(age, everything())
+
+peru_LT_model %>%
+  select(-obs_qx , age, Observed = obs_mx, everything()) %>%
+  mutate(age = as_factor(age)) %>%
+  pivot_longer(-age, names_to = "model", values_to = "mx") %>%
+  filter(model %in% c("Observed", "Gompertz", "Makeham")) %>%
+  plot_log_mort(x = age, y = log(mx), color = model, group = model) 
+
+```
+
+Plotting both fitted rates against the observed rates, we see that the
+additional constant in the _Gompertz-Makeham_ enables the model to follow the
+observed trends in child and young adult mortality much closer. This presents
+a good case for using _Gompertz-Makeham_ over just _Gompertz_.
+
+
+### _Q4.c_
+
+```{r}
+
+# Question 4c -------------------------------------------------------------
+n = 
+model_HP_mx <- with(peru_LT, MortalityLaw(x = Age, mx = nmx, law = "HP"))
+model_HP_qx <- with(peru_LT, MortalityLaw(x = Age, qx = nqx, law = "HP"))
+
+peru_LT_model <- peru_LT_model %>%
+  mutate(
+    n = lead(Age) - Age,
+    `Heligman-Pollard` = predict(model_HP_mx, x = Age),
+    `Heligman-Pollard2` = -1 * log(1 - predict(model_HP_qx, x =ge)) / n)
+
+coef_HP <- coef(model_HP_mx)
+
+```
+
+The _Heligman-Pollard_ model uses three terms to capture child mortality,
+the adult accident bump, and old-age mortality to predict odds of death:
+
+$$
+\frac{q_x}{1 - q_x} = A^{(x+B)^2} + D e^{-E(log(x) - log(F))^2} + GH^x
+$$
+
+Fitting this model with our observed mortality rates, we get the model
+parameters:
+
+(`r paste0(LETTERS[1:8], collapse = ", ")`) =
+`r formatC(coef_HP, format = "g", digits = 3)`
+
+_Note: this model was fit using the MortalityLaws package, optimizing
+the function $log^2(\frac{est.}{obs.})$, and using $M_x$ as an input (internal
+$M_x$ to $q_x$ conversion)._
+
+```{r}
+peru_LT_model %>%
+  select(-obs_qx, age, Observed = obs_mx, everything()) %>%
+  pivot_longer(-age, names_to = "model", values_to = "mx") %>%
+  filter(model %in% c("Observed", "Heligman-Pollard")) %>%
+  plot_log_mort(x = age, y = log(mx), color = model, group=model)
+
+```
+
+This model does a great job of capturing the high child mortality and gets
+closer to capturing the adult accident hump, following the observed data
+closely.
+
+
+### _Q4.d_
+
+```{r}
+# Question 4d -------------------------------------------------------------
+coaleDemenyLTW <- demogR::cdmltw(sex = "F")
+peru_mx_0to95 <- peru_LT %>% filter(Age < 100) %>% pull(nmx)
+
+best_match_lt <-
+  coaleDemenyLTW[["nmx"]] %>%
+  apply(1, function(x) rmse(x, log(peru_mx_0to95))) %>%
+  which.min()
+
+peru_LT_model <- peru_LT_model %>%
+  mutate(
+    obs_qx_95 = obs_qx,
+    standard_qx = c(coaleDemenyLTW[["nqx"]][best_match_lt, ], NA)
+  )
+
+peru_LT_model[["obs_qx_95"]][21:22] <- c(1, NA)
+
+model_brass <- lm(
+  qlogis(obs_qx_95) ~ qlogis(standard_qx),
+  data = filter(peru_LT_model, Age < 95)
+)
+
+peru_LT_model <- peru_LT_model %>%
+  mutate(
+    brass_pred_fit_qx = c(plogis(model_brass$fitted.values), 1, NA),
+    brass_pred_obs_qx = plogis(predict(model_brass, data.frame(standard_qx = obs_qx))),
+    brass_pred_fit_mx = -1 * log(1 - brass_pred_fit_qx) / n
+  )
+
+coef_brass <- coef(model_brass)
+
+```
+
+The _Brass relational model_ estimates mortality given a "standard" reference
+mortality ($q^*(x)$) as an input. This standard mortality comes from the a
+_Coale-Demeny West_ model life table, where the life table that was selected
+was the one with the lowest RMSE compared to our observed mortality (life
+table index #`r best_match_lt`). The model and estimated parameters are shown
+below:
+
+$(\alpha, \beta) =$ `r round(coef_brass, 3)`
+
+$$
+\text{logit}(q_{\alpha, \beta}(x)) = \alpha + \beta \times \text{logit}(q^*(x))
+$$
+
+```{r}
+peru_LT_model %>%
+  select(
+    Age, Observed = obs_qx,
+    Brass = brass_pred_fit_qx, Brass2 = brass_pred_obs_qx
+  ) %>%
+  pivot_longer(-Age, names_to = "model", values_to = "qx") %>%
+  filter(model %in% c("Observed", "Brass")) %>%
+  plot_log_mort(x = Age, y = log(qx), color = model, group=model) +
+  labs(
+    title = "Age-Specific Log Probability of Death",
+    y = "Log Probability of Death"
+  )
+
+```
+
+Plotting the observed and estimated $q_x$ values, we see that the _Brass_ model
+also does a good job of capturing high child mortality, but underestimates
+the adult accident hump. In the old ages this model loses validity, since it
+was fix with a lower terminal age than is present in the observed data.
+
+
+### _Q4.e_
+
+```{r}
+# Question 4.e -------------------------------------------------------------
+peru_LT_compare <- peru_LT_model %>%
+  mutate(n = lead(Age) - Age) %>%
+  select(
+    Age, n, 
+    Observed = obs_mx,
+    Gompertz,
+    Makeham,
+    `Heligman-Pollard`,
+    Brass = brass_pred_fit_mx
+  )
+
+# knitr::kable(
+#   peru_LT_compare,
+#   booktabs = TRUE,
+#   digits = 3,
+#   caption = "Comparison of models against observed Mx in peru females, 2015-2020"
+# )
+
+peru_LT_compare %>%
+  pivot_longer(!c(Age, n), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Gompertz", "Makeham", "Heligman-Pollard", "Brass")) %>%
+  plot_log_mort(x = Age, y = log(Mx), color = model, group=model)
+
+```
+
+
+```{r}
+peru_LT_compare_fit <- peru_LT_compare %>%
+  filter(Age < 95) %>%
+  select(-Age) %>%
+  mutate_all(log) %>%
+  summarise_all(~rmse(., Observed)) %>%
+  select(-Observed) %>%
+  pivot_longer(everything(), names_to = "Model", values_to = "RMSE") %>%
+  arrange(RMSE)
+
+knitr::kable(
+  peru_LT_compare_fit,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "$RMSE$ of estimated $log(m_x)$ against observed $log(m_x)$"
+)
+```
+
+Comparing all four of these models to the observed data, both visually and
+via the root mean-squared-error of log-transformed $m_x$, shows that the
+_Brass_ model most closely follows the observed data.
 
 
 

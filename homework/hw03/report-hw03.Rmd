@@ -1,0 +1,720 @@
+---
+title: "Homework 03"
+author: "Ihsan Kahveci"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    number_sections: true
+---
+
+\tableofcontents 
+\newpage 
+
+
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+plot_size=15
+
+rm(gr)
+```
+
+
+# Questions
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+
+# Load libraries
+library(tidyverse)
+library(MortalityLaws)
+library(demogR)
+library(MortCast)
+library(demography)
+
+# Helper functions
+rmse <- function(x, y) sqrt(mean((x - y)^2))
+mx_to_qx <- function(mx, n) 1 - exp(-1 * n * mx)
+qx_to_mx <- function(qx, n) -1 * log(1 - qx) / n
+
+# plotting posterior density estimates
+post_draws_density <- function(data, ...) {
+  ggplot(data, aes(...)) +
+    geom_density() +
+    theme_bw() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom"
+    ) +
+    labs(
+      subtitle = paste0("Posterior density estimate"),
+      y = "Density",
+      color = "Type"
+    )
+
+}
+
+# plotting log mortality models
+plot_log_mort <- function(data, ...) {
+  ggplot(data, aes(...)) +
+    geom_point() +
+    geom_line() +
+    theme_bw() +
+    theme(
+      text = element_text(family = "serif", size = 15),
+      legend.position = "bottom"
+    ) +
+    labs(
+      title = "Age-Specific Log Mortality Rates",
+      subtitle = "Peru, Females, 2020-2025",
+      x = "Age (years)",
+      y = "Log Mortality Rate",
+      color = "Model"
+    )
+}
+
+# Control randomness
+set.seed(57)
+
+
+# Load data
+data(mxF, package = "wpp2019")
+peru_mort <- mxF %>%
+  filter(name == "Peru") %>%
+  select(-country_code, -name) %>%
+  pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
+  extract(period, "year", regex = "(^[0-9]{4})", convert = TRUE) %>%
+  filter(year < 2025) %>%
+  select(year, age, everything()) %>%
+  arrange(year, age)
+
+
+```
+
+
+## _Q1_
+
+```{r}
+# Question 1 --------------------------------------------------------------
+
+peru_mort_wide <- peru_mort %>% pivot_wider(names_from = year, values_from = Mx)
+peru_mort_mat <- peru_mort_wide %>% column_to_rownames("age") %>% as.matrix()
+
+```
+
+```{r}
+# Question 1a -------------------------------------------------------------
+
+knitr::kable(
+  peru_mort_wide,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Peru female age-specific mortality rates, 1950-2020"
+)
+
+```
+
+
+### _Q1.a_
+
+```{r}
+# Question 1a -------------------------------------------------------------
+
+model_LC <- leecarter.estimate(peru_mort_mat)
+
+LC_lsq_mx <- with(model_LC, apply(
+  matrix(bx) %*% matrix(kt, nrow = 1), 2, function(x) ax + x
+))
+dimnames(LC_lsq_mx) <- dimnames(peru_mort_mat)
+
+peru_mort_lsq <- LC_lsq_mx %>%
+  as_tibble(rownames = "age") %>%
+  pivot_longer(-age, names_to = "year", values_to = "log_Mx") %>%
+  mutate(
+    year = as.integer(year),
+    age = as.integer(age),
+    `Least-squares Estimate` = exp(log_Mx),
+  ) %>%
+  select(-log_Mx)
+
+peru_LC_compare <- peru_mort %>%
+  left_join(peru_mort_lsq, by = c("age", "year")) %>%
+  rename(Observed = Mx)
+
+```
+
+The _Lee-Carter_ model is defined as:
+
+$$
+log(m_{x,t}) = a_x + k_t b_x + \epsilon_{x,t}
+$$
+
+One way to fit this model is the apply a set of constraints to $b_x$ and $k_t$.
+Under the constraints $\sum b_x = 1$ and $\sum k_t = 0$, we get:
+
+$$
+\hat{a}_x = \frac{1}{T} \sum_{t=1}^T log(m_{x,t}) \\
+\hat{k}_t = \sum_{x=0}^{A-1} \left[ log(m_{x,t}) - a_x \right]
+$$
+With these constraints, we can fit a  least squares regression on $\hat{b}_x$
+with an intercept of 0. Below are the estimated parameters and mortality rates
+
+_Note: This model was fit using the MortCast package._
+
+```{r}
+model_LC_ls_x_tbl <- tibble(
+  age = names(model_LC$ax),
+  ax = model_LC$ax,
+  least_squares_bx = model_LC$bx
+)
+
+model_LC_ls_t_tbl <- tibble(
+  year = names(model_LC$kt),
+  least_squares_kt = model_LC$kt
+)
+
+knitr::kable(
+  model_LC_ls_x_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Age", "$\\hat{a}_x$", "$\\hat{b}_x$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (least squares method)"
+)
+
+knitr::kable(
+  model_LC_ls_t_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "$\\hat{k}_t$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (least squares method)"
+)
+
+```
+
+```{r, fig.dim=c(7, 8.5)}
+peru_LC_compare %>%
+  pivot_longer(!c(year, age), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "Least-squares Estimate")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model) +
+  facet_wrap(vars(year), ncol = 3) +
+  labs(subtitle = "Peru, Females, 1950-2020 (Least-squares Estimate)")
+
+```
+
+\newpage 
+
+### _Q1.b_
+
+```{r}
+# Question 1b -------------------------------------------------------------
+
+ax_hat <- rowMeans(log(peru_mort_mat))
+model_LC_svd <- svd(apply(log(peru_mort_mat), 2, function(x) x - ax_hat), 1, 1)
+
+# Get normalized bx and kt
+LC_svd_bx <- model_LC_svd$u / sum(model_LC_svd$u)
+LC_svd_kt <- t(model_LC_svd$v) * sum(model_LC_svd$u) * model_LC_svd$d[1]
+
+LC_svd_mx <- apply(LC_svd_bx %*% LC_svd_kt, 2, function(x) ax_hat + x)
+dimnames(LC_svd_mx) <- dimnames(peru_mort_mat)
+
+peru_mort_svd <- LC_svd_mx %>%
+  as_tibble(rownames = "age") %>%
+  pivot_longer(-age, names_to = "year", values_to = "log_Mx") %>%
+  mutate(
+    year = as.integer(year),
+    age = as.integer(age),
+    `SVD Estimate` = exp(log_Mx),
+  ) %>%
+  select(-log_Mx)
+
+peru_LC_compare <- peru_LC_compare %>%
+  left_join(peru_mort_svd, by = c("age", "year"))
+
+```
+
+A singular value decomposition can also be used to implement the _Lee-Carter_
+model, where the matrix $C = \left[ log(m_{x,t}) - a_x \right]$ is used to get
+$b_x$ and $k_t$ with the decomposition:
+
+$$ \text{SVD}(C) = U \Lambda V^\top $$
+
+Where:
+
+$$
+b_x = U_{x,1} \div \sum_x U_{x,1} \\
+k_t = \left[ V^\top \right]_{1,t} \times \sum U_{x,1} \times \Lambda_1
+$$
+
+are the normalized estimates. The estimated parameters and fitted values are
+below.
+
+```{r}
+model_LC_svd_x_tbl <- tibble(
+  age = names(model_LC$bx),
+  svd_bx = as.vector(LC_svd_bx)
+)
+
+model_LC_svd_t_tbl <- tibble(
+  year = names(model_LC$kt),
+  svd_kt = as.vector(LC_svd_kt),
+)
+
+knitr::kable(
+  model_LC_svd_x_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Age", "$b_x$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (SVD method)"
+)
+
+knitr::kable(
+  model_LC_svd_t_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "$k_t$"),
+  eval = FALSE,
+  caption = "Lee-Carter model parameter estimates (SVD method)"
+)
+
+```
+
+
+```{r fig.dim=c(7, 8.5)}
+peru_LC_compare %>%
+  pivot_longer(!c(year, age), names_to = "model", values_to = "Mx") %>%
+  filter(model %in% c("Observed", "SVD Estimate")) %>%
+  plot_log_mort(x = age, y = log(Mx), color = model) +
+  facet_wrap(vars(year), ncol = 3) +
+  labs(subtitle = "Peru, Females, 1950-2020 (SVD Method)")
+
+```
+
+Comparing the estimated $M_x$ from the normalized SVD to our observed data, we
+see   the estimates also track the observed data well. Note if we
+were to use the unnormalized SVD, the estimated $M_x$ would remain mostly
+constant over time, matching the middle years the closest (since those years
+are closest to the mean over time).
+
+
+### _Q1.c_
+
+```{r}
+# Question 1c -------------------------------------------------------------
+
+LC_compare_bx_tbl <- model_LC_ls_x_tbl %>%
+  left_join(model_LC_svd_x_tbl, by = "age") %>%
+  select(-ax) %>%
+  mutate(abs_diff = abs(least_squares_bx - svd_bx))
+
+LC_compare_kt_tbl <- model_LC_ls_t_tbl %>%
+  left_join(model_LC_svd_t_tbl, by = "year") %>%
+  mutate(abs_diff = abs(least_squares_kt - svd_kt))
+
+peru_LC_compare_fit <- peru_LC_compare %>%
+  group_by(year) %>%
+  select(-age) %>%
+  mutate_at(vars(-group_cols()), log) %>%
+  summarise_all(~rmse(., Observed)) %>%
+  select(-Observed) %>%
+  ungroup() %>%
+  select(-year) %>%
+  summarize_all(mean) %>%
+  pivot_longer(everything(), names_to = "Model", values_to = "RMSE") %>%
+  arrange(RMSE)
+
+knitr::kable(
+  LC_compare_bx_tbl,
+  booktabs = TRUE,
+  digits = 5,
+  col.names = c("Age", "LS $\\hat{b}_x$", "SVD $\\hat{b}_x$", "diff"),
+  eval = FALSE,
+  caption = "Lee-Carter model comparison"
+)
+
+knitr::kable(
+  LC_compare_kt_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Year", "LS $\\hat{k}_t$", "SVD $\\hat{k}_t$", "diff"),
+  eval = FALSE,
+  caption = "Lee-Carter model comparison"
+)
+
+knitr::kable(
+peru_LC_compare_fit,
+booktabs = TRUE,
+digits = 4,
+caption = "$RMSE$ of estimated $log(M_x)$ against observed $log(M_x)$"
+)
+
+```
+
+Looking at the previous two plots, and comparing the root mean-squared-error
+of the log-transformed fitted $M_x$ against the observed $M_x$, we see  ,
+that both methods performs almost the same.
+
+
+### _Q1.d_
+
+```{r}
+# Question 1d -------------------------------------------------------------
+
+data(popF, package = "wpp2019")
+
+mex_pop <- popF %>%
+  filter(name == "Peru") %>%
+  select(-country_code, -name ) %>%
+  extract(age, "age", convert = TRUE) %>%
+  column_to_rownames("age") %>%
+  as.matrix() %>%
+  `*`(1000)
+
+mex_mort_tbl <- mxF %>%
+  filter(name == "Peru") %>%
+  select(-country_code, -name) %>%
+  pivot_longer(-age, names_to = "period", values_to = "Mx") %>%
+  extract(period, "year", regex = "(^[0-9]{4})", convert = TRUE) %>%
+  filter(year < 2025)
+
+# Collapse 0 and 1-4 age group Mx
+mex_mort_tbl_u5 <- mex_mort_tbl %>%
+  filter(age < 5) %>%
+  mutate(
+    n = age * 3 + 1,
+    sx = 1 - mx_to_qx(Mx, n)
+  ) %>%
+  group_by(year) %>%
+  summarise(sx = prod(sx)) %>%
+  mutate(
+    age = 0,
+    Mx = qx_to_mx(1 - sx, 5)
+  ) %>%
+  select(age, year, Mx)
+
+mex_mort <- mex_mort_tbl %>%
+  filter(age >= 5) %>%
+  bind_rows(mex_mort_tbl_u5) %>%
+  pivot_wider(names_from = year, values_from = Mx) %>%
+  arrange(age) %>%
+  column_to_rownames("age") %>%
+  as.matrix()
+
+demog_data <- demogdata(
+  data = mex_mort,
+  pop = mex_pop,
+  ages = seq(0, 100, 5),
+  years = seq(1950, 2020, 5),
+  type = "mortality",
+  label = "Peru",
+  name = "Female"
+)
+
+model_mex_LC <- demography::lca(demog_data)
+
+forecast_mex <- forecast(model_mex_LC, h = 1, level = 95, se = "innovonly")
+
+forecast_mex_kt <- as_tibble(forecast_mex[["kt.f"]])
+
+forecast_mex_mx <- forecast_mex$rate %>%
+  as_tibble() %>%
+  mutate_all(as.vector) %>%
+  mutate(age = rownames(forecast_mex$rate$Female)) %>%
+  select(age, Mx = Female, lower_95 = lower, upper_95 = upper)
+
+forecast_mex_mx_75 <- forecast_mex_mx %>% filter(age == 75)
+
+```
+
+The _Lee-Carter_ method can also be used to obtain a probabilistic forecast of
+mortality. Here we use the _demography_ _R_ package to forecast mortality for
+females in Peru in the period 2020-2025. Below are the predicted mortality
+index $k_t$ and mortality rate for females in the 75-80 age group. The
+confidence level is set to $95\%$.
+
+
+```{r}
+knitr::kable(
+  forecast_mex_kt,
+  booktabs = TRUE,
+  digits = 3,
+  eval = FALSE,
+  col.names = c("Est. $k_t$", "95% Low", "95% High"),
+  caption = "Forecast $k_t$"
+)
+
+knitr::kable(
+  select(forecast_mex_mx_75, -age),
+  booktabs = TRUE,
+  digits = 3,
+  eval = FALSE,
+  col.names = c("Est. $M_x$", "95% Low", "95% High"),
+  caption = "Forecast mortality for age group 75-80"
+)
+```
+
+\newpage 
+
+## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+prior_a <- 1
+prior_b <- 1
+
+n_married <- 112
+divorced_n_obs <- 43
+
+```
+
+### _Q2.a_
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+
+divorced_posterior <- function(n) {
+  rbeta(n, prior_a + divorced_n_obs, n_married - divorced_n_obs + prior_b)
+}
+
+```
+
+We can generally define the posterior distribution as the product
+of a likelihood and prior function:
+
+$$
+\begin{aligned}
+\text{posterior} &\propto \text{likelihood} \times \text{prior} \\
+P(\theta \mid X = x) &\propto P(X =x \mid \theta) \times P(\theta)
+\end{aligned}
+$$
+
+where, given the parameters of the problem, the likelihood takes the form of a
+binomial distribution, and the prior probability follows a uniform distribution
+(or, a beta distribution with $\alpha = \beta = 1$):
+
+$$
+\begin{aligned}
+X \mid \theta &\sim \text{Binomial}(X, \theta) \\
+\theta &\sim \text{Beta}(1,1)
+\end{aligned}
+$$
+
+Binomial likelihood function is defined as $k$ successes in $n$ trials, each with a probability
+$p$ of occurring:
+ 
+$$
+\text{Likelihood: } 
+P(X=k \mid \theta; n) =
+{n \choose k} \theta^{k}(1-\theta)^{n-k}
+$$
+
+Prior, $\theta$, is a beta distribution, it acts as a conjugate
+prior for the binomial likelihood function. Hence the
+posterior distribution is a beta distribution in the form:
+
+$$
+\text{Posterior: }
+P(\theta \mid X = k; \alpha, \beta) =
+\text{Beta}(\alpha + k, n-k+\beta)
+$$
+
+From the problem, we know $k = `r divorced_n_obs`$ divorces occurred over the
+period 2005-2015 from a sample of $n = `r n_married`$ married people in 2005.
+This leads us to our final analytic posterior distribution:
+
+$$
+\begin{aligned}
+P(\theta \mid X = k; \alpha, \beta, n) &= \text{Beta}(\alpha + k, n-k+\beta) \\
+P(\theta \mid X = 43; 1, 1, 112) &= \text{Beta}(1 + 43, 112 - 43 + 1) \\
+&= \text{Beta}(44, 70)
+\end{aligned}
+$$
+
+
+### _Q2.b_
+
+```{r}
+
+# Question 2b -------------------------------------------------------------
+
+divorced_n_sims <- 1000
+
+divorced_posterior_draws <- divorced_posterior(divorced_n_sims)
+
+divorced_post_tbl <- tibble(
+  Mean = mean(divorced_posterior_draws),
+  Median = quantile(divorced_posterior_draws, .5),
+  `95% Low` = quantile(divorced_posterior_draws, .025),
+  `95% High` = quantile(divorced_posterior_draws, .975)
+)
+
+```
+
+From our analytic posterior distribution of $\theta$, we simulate a new sample
+of $`r formatC(divorced_n_sims, big.mark = ",")`$ people. From this sample, we
+can get a $95\%$ Bayesian confidence interval for $\theta$ by pulling the
+$2.5^{th}$ and $97.5^{th}$ percentile of the data.
+
+```{r}
+knitr::kable(
+  divorced_post_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Posterior distribution summary"
+)
+
+```
+
+
+### _Q2.c_
+
+```{r}
+# Question 2c -------------------------------------------------------------
+
+divorced_true_post <- tibble(
+  value = qbeta(seq(0, 1, .001), 44, 77),
+  type = "True Distribution"
+)
+
+divorced_est_post <- tibble(
+  value = divorced_posterior_draws,
+  type = "Estimate"
+)
+
+divorced_post_compare_tbl <- dplyr::bind_rows(
+  divorced_true_post, divorced_est_post
+)
+
+```
+
+With the new sample from our posterior, we can plot a nonparametric density
+estimate for our posterior. The true distribution is also included for
+reference. Both density curves use a Gaussian kernel.
+
+```{r}
+divorced_post_plot <-
+  post_draws_density(divorced_post_compare_tbl, x = value, color = type) +
+  labs(
+    title = "Probability of Divorce by 2015, Given Marriage in 2005",
+    x = "Probability of Divorce")
+
+divorced_post_plot
+```
+
+\newpage 
+
+## _Q3_
+
+```{r}
+# Question 3 --------------------------------------------------------------
+
+study_obs <- c(
+   2.1, 9.8, 13.9, 11.3, 8.9, 15.7, 16.4, 4.5, 8.9, 11.9, 12.5, 11.1, 11.6,
+  14.5, 9.6,  7.4,  3.3, 9.1,  9.4,  6.0, 7.4, 8.5,  1.6, 11.4,  9.7)
+
+true_sd <- 4
+prior_mean <- 10
+prior_sd <- 3
+
+n = length(study_obs)
+data_mean = mean(study_obs)
+study_post_mean = ((prior_mean/prior_sd^2) + ((n * data_mean)/true_sd^2))/((1/prior_sd^2) + (n/true_sd^2))
+study_post_variance = 1/((1/prior_sd^2) + (n/true_sd^2))
+study_post_sd = sqrt(study_post_variance)
+
+```
+
+In this scenario, we take both our likelihood and prior distributions to be
+normal:
+
+$$
+\begin{aligned}
+X \mid \theta  &\propto N(\theta, \sigma^2) \\
+\theta &\propto N(\mu, \tau^2)
+\end{aligned}
+$$
+where we are given $\mu = `r prior_mean`$, $\tau = `r prior_sd`$, 
+$\sigma = `r true_sd`$, and $x = `r data_mean`$, our observed mean.
+
+
+By Bayes theorem:
+
+$$
+\text{Pr}(\mu \, | \, \mathbf{x}, \sigma^2) \propto \text{Pr}(\mathbf{x} \, | \, \mu, \sigma^2) \text{Pr}(\mu)
+$$
+
+$$
+\text{N}(\mu_1, \tau_1^2) = \text{N}(\mu, \sigma^2) \text{N}(\mu_0, \tau_0^2)
+$$
+
+where the posterior mean:
+
+$$
+\mu_1 = \frac{\frac{\mu_0}{\tau_0^2} + \frac{n \bar{x}}{\sigma^2}}{\frac{1}{\tau_0^2} + \frac{n}{\sigma^2}}
+$$
+
+and the posterior variance:
+
+$$
+\tau_1^2 = (\frac{1}{\tau_0^2} + \frac{n}{\sigma^2})^{-1}
+$$
+
+
+```{r}
+
+study_posterior <- function(n) rnorm(n, study_post_mean, study_post_sd)
+
+study_n_sims <- 1000
+
+study_posterior_draws <- study_posterior(study_n_sims)
+
+study_post_tbl <- tibble(
+  Mean = mean(study_posterior_draws),
+  Median = quantile(study_posterior_draws, .5),
+  `95% Low` = quantile(study_posterior_draws, .025),
+  `95% High` = quantile(study_posterior_draws, .975)
+)
+
+
+```
+
+We can draw $`r formatC(study_n_sims, big.mark = ",")`$ new values from this
+posterior distribution to get a new sample. From this sample, we
+can get a $95\%$ Bayesian confidence interval for $\theta$ by pulling the
+$2.5^{th}$ and $97.5^{th}$ percentile of the data.
+
+```{r}
+knitr::kable(
+  study_post_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Posterior distribution summary"
+)
+
+```
+
+\newpage 
+
+# Appendix
+
+```{r getlabels, include=FALSE}
+labs <- knitr::all_labels()
+labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
+```
+
+```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
+```
