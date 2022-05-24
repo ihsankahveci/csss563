@@ -1,0 +1,589 @@
+---
+title: "Homework 06"
+author: "Ihsan Kahveci"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    number_sections: yes
+  word_document: default
+---
+
+\tableofcontents 
+\newpage
+
+```{r setup, include=FALSE}
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, 
+                      fig.asp = gr, fig.width = 12)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+# Questions
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+
+# Load libraries
+library(tidyverse)
+library(bayesLife)
+library(bayesPop)
+library(migest)
+
+# Data folders
+e0.dir <- "../data/e0/sim03092016"
+tfr.dir <- "../data/tfr/sim01192018"
+pop.dir <- "../data/pop/sim05222022"
+mig.file <- "../data/WPP2019_Period_Indicators_Medium.csv"
+
+
+# Control randomness
+set.seed(57)
+options(scipen = 999)
+```
+
+## _Q1_
+
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+# Run this once to get pop predictions
+# pop.pred <- pop.predict(
+#                end.year = 2100, start.year = 1950, present.year = 2020,
+#                wpp.year = 2019, output.dir = pop.dir, nr.traj = 50,
+#                inputs = list(tfr.sim.dir = tfr.dir,
+#                              e0F.sim.dir = e0.dir,
+#                              e0M.sim.dir = "joint_"),
+#                keep.vital.events = FALSE, replace.output=TRUE)
+
+pop_sim_pred <- get.pop.prediction(pop.dir)
+
+```
+
+### _Q1.a_
+
+In `bayes.pop`, One can specify the quantities derived from population projections using `pop.expressions`.
+
+> As another example, the potential support ratio can be defined as "PFR[5:13] / PFR[14:27]". (Ševčíková, Raftery 2016)
+
+Ševčíková, H., & Raftery, A. E. (2016). bayesPop: Probabilistic Population Projections. Journal of Statistical Software, 75(5), 1–29. https://doi.org/10.18637/jss.v075.i05
+
+
+```{r}
+
+# Question 1a -------------------------------------------------------------
+
+# Defined using `?pop.expressions`
+over65_exp <- "PAU[14:27]"
+support_exp <- "PAU[5:13] / PAU[14:27]"
+
+```
+
+Using our converged life expectancy at birth and total fertility rate simulations, we can create probabilistic projections of the following population quantities:
+
+_Note that the "Potential Support Ratio" is defined as:
+$\frac{\text{people aged 20-64}}{\text{people aged 65 and over}}$_
+
+
+```{r}
+pop.trajectories.plot(
+  pop_sim_pred, "Australia",
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Australia Total Population"
+)
+```
+
+### _Q1.b_
+
+```{r}
+# Question 1b -------------------------------------------------------------
+
+pop.trajectories.plot(
+  pop_sim_pred, "Australia",
+  sex = "male",
+  sum.over.ages = TRUE,
+  main = "Australia Total Male Population"
+)
+
+```
+
+### _Q1.c_
+
+```{r}
+# Question 1c -------------------------------------------------------------
+
+pop.trajectories.plot(
+  pop_sim_pred, "Australia",
+  expression = over65_exp,
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Australia Total Population over 65"
+)
+
+```
+
+### _Q1.d_
+
+```{r}
+# Question 1d -------------------------------------------------------------
+
+pop.trajectories.plot(
+  pop_sim_pred, "Australia",
+  expression = support_exp,
+  sex = "both",
+  sum.over.ages = TRUE,
+  main = "Australia Potential Support Ratio",
+  show.legend = FALSE)
+
+legend("topright", c("median",  "80% PI", "90% PI", "observed"), 
+       col = c("red", "red", "red", "black"), 
+       lty = c(1,2,3, 1), cex = 1, bty = "n", lwd = c(2,2,2,2))
+
+```
+
+Looking at the projections of potential support ratio, we see continued
+declines into the future, though eventually at a slower rate. This indicates
+Australia's age structure is likely to continue shifting to older ages. From a social security perspective, this means that Australia's number of workers per retiree is going to decrease from 2020-2100. 
+
+## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+au_mig <- read_csv(mig.file) %>%
+  filter(Location == "Australia") %>%
+  transmute(year = MidPeriod - 3, nmr = CNMR, nm = NetMigrations) %>%
+  filter(year < 2020)
+
+```
+
+### _Q2.a_
+
+```{r}
+
+# Question 2a -------------------------------------------------------------
+au_mig %>%
+  select(-nm) %>% 
+  knitr::kable(
+  booktabs = TRUE, digits = 3,
+  col.names = c("Period start", "CNMR"),
+  caption = "Crude net migration rate (CNMR) for Australia, 1950-2100"
+)
+
+```
+
+### _Q2.b_
+
+
+```{r}
+# Question 2b -------------------------------------------------------------
+au_ts <- au_mig %>%
+  pull(nmr) %>%
+  ts()
+
+au_model = arima(au_ts, order=c(1,0,0))
+```
+
+I fit an order $1$ autoregressive model to the subset of Australia Crude Net Migration Rates
+obtained from UN, and extract some model parameters below.
+_Note that the AR(1) model was fit using the "mle" method._
+
+```{r, echo=FALSE}
+modelsummary::msummary(au_model, 
+                       estimate = "{estimate} [{conf.low}, {conf.high}]", 
+                       statistic = NULL, fmt = 2, output = "kableExtra",
+                       caption = "AR(1) Model for Australia CNMR, 1950-2020")  %>%
+  kableExtra::kable_styling(latex_options = "hold_position")
+
+```
+
+
+
+### _Q2.c_
+
+Using these model parameters, we can find an analytic solution for the
+predictive probability distribution of net migration rates in Australia for
+2020-2025, which takes the form:
+
+$$ (F_{t+1} - \mu) = \rho*(F_{t} - \mu) + \epsilon $$
+
+$$ \sigma^2 =\frac{ \sum^{N}_{i=1} (\hat{y_i} - y_i)^2 }{N} $$
+
+
+```{r}
+# Question 2c -------------------------------------------------------------
+
+au_mig_last = au_mig$nmr[length(au_mig$nmr)]
+au_sd = sqrt(au_model$sigma2)
+au_mean = au_model$coef["intercept"]
+au_ar1 = au_model$coef["ar1"]
+au_mean_pred = unname(au_ar1) * (au_mig_last - au_mean) + au_mean
+au_pred_dist <- qnorm(seq(.001, .999, .001), mean = au_mean_pred, sd = au_sd)
+
+au_pred_tbl <- tibble(
+  Mean = au_mean_pred,
+  Median = au_mean_pred,
+  `2.5% CI` = Mean - 1.96 * au_sd,
+  `97.5% CI` = Mean + 1.96 * au_sd)
+```
+
+
+- $\sigma^2 = `r au_model$sigma2`$  
+- $F_{2020} = `r au_mean_pred`$ 
+
+```{r, echo=FALSE}
+knitr::kable(
+  au_pred_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Predictive Distribution of Australia Crude Net Migration Rate, 2020-2025") %>%
+  kableExtra::kable_styling(latex_options = "hold_position")
+
+```
+
+
+### _Q2.d_
+
+```{r}
+
+# Question 2d -------------------------------------------------------------
+
+au_pred_dist <- qnorm(seq(.0005, .9995, .001), mean = au_mean_pred, sd = au_sd)
+
+au_2020_sample <- rnorm(1000, mean = au_mean_pred, sd = au_sd)
+
+au_2020_tbl <-
+  tibble(
+    Analytic = au_pred_dist,
+    Sample = au_2020_sample
+  ) %>%
+  pivot_longer(everything(), names_to = "dist", values_to = "value")
+
+```
+
+We can also sample from this distribution to show it does indeed follow what
+we predict analytically:
+
+```{r}
+ggplot(au_2020_tbl, aes(x = value, fill = dist)) +
+  geom_histogram(
+    data = filter(au_2020_tbl, dist == "Sample"),
+    aes(y = ..density..),
+    binwidth = .5,
+    alpha = .5) +
+  geom_density(
+    data = filter(au_2020_tbl, dist == "Analytic"),
+    alpha = .2) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predictive Distributions of Crude Net Migration Rate (Analytic and Sample)",
+    subtitle = "Australia, 2020-2025",
+    x = "Crude Net Migration Rate",
+    y = "Density",
+    fill = "Type"
+  )
+
+```
+
+
+### _Q2.e_
+
+Assuming that age and sex distribution of migrants has not changed from 2012, which is the last
+time the UN reported age/sex-specific net migration rates. 
+
+```{r}
+# Question 2e -------------------------------------------------------------
+
+library(wpp2012)
+data("migrationF", package = "wpp2012")
+data("migrationM", package =  "wpp2012")
+
+au_mig12 <- bind_cols( 
+  migrationF %>%
+  filter(country == "Australia") %>%
+  select(age, migF = `2015-2020`), 
+  migrationM %>%
+  filter(country == "Australia") %>%
+  select(migM = `2015-2020`)) %>% 
+  mutate(migTotal = migF + migM, 
+         pasmr = migTotal/sum(migTotal))
+
+
+au_mig20 = tibble(age = au_mig12$age, pasmr = au_mig12$pasmr) %>% 
+  mutate(asmr = pasmr * au_mean_pred)
+
+```
+
+Based on age distribution of net migration stocks in 2012, I decomposed the projected migration rate for 2020 by age groups using the formula:
+
+$$ \text{ASMR}_{20} = \text{PASMR}_{12} * \text{CNMR}_{20} $$
+
+```{r}
+au_mig20 %>%
+  knitr::kable(
+  booktabs = TRUE, digits = 2,
+  col.names = c("Age Grop", "PASMR", "ASMR"),
+  caption = "Predicted Age-spesific Migration Rates (ASMR) for Australia, 2020-2025", 
+)
+
+```
+
+
+```{r}
+au_mig20 %>%
+  mutate(age = seq(0, 100, 5)) %>%
+  ggplot(aes(age, asmr)) + 
+  geom_line(color="coral", size=3) +
+  theme_bw(base_size = 15) + 
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predicted Age-spesific Migration Rates (ASMR)",
+    subtitle = "Australia, 2020-2025",
+    x = "Age-spesific Migration Rate",
+    y = "Age" ) +
+  scale_x_continuous(n.breaks = 10)
+```
+
+
+\newpage
+
+### _Q2e_ Alternative 
+
+```{r}
+rc_decomposition = function(x, params){
+  a1 = params[["a1"]]
+  alpha1 = params[["alpha1"]]
+  a2 = params[["a2"]]
+  alpha2 = params[["alpha2"]]
+  mu = params[["mu2"]]
+  lambda = params[["lambda2"]]
+  c = params[["c"]]
+  
+  mx = a1 * exp(-alpha1 * x) + #first component
+    a2 * exp(-alpha2 * (x - mu) - exp(-lambda * (x - mu))) + #second component
+    c #constant component
+  
+  return(mx)
+} 
+
+rc_params = deframe(migest::rc_model_fund)
+```
+
+Migration schedules without a retirement peak may be represented by a "reduced" model with seven parameters, because in such instances the  _post-labor force_ component of the model is omitted (Rogers & Castro 1981). The simplified 7 parameter model:
+
+$$ M(x) = a_1e^{-\alpha_1x} + a_2e^{-\alpha_2(x-\mu) - e^{-\lambda(x-\mu)}} + c $$ 
+
+`migest` package provides fundamental parameters for Rogers-Castro migration schedule. I plug them into the equation above: 
+
+$$ M(x) = `r rc_params["a1"]` e^{-`r rc_params["alpha1"]`x} + `r rc_params["a2"]`e^{-`r rc_params["alpha2"]`(x-`r rc_params["mu2"]`) - e^{-`r rc_params["lambda2"]`x-`r rc_params["mu2"]`)}} + `r rc_params["c"]` $$
+
+The result is modeled age schedule for migration rates. Hence, if we multiply the resulting vector with the predicted migration rate for 2020-2025, we get age-spesific migration rates for 2020-2025. We need to standardize the output so that it sums to 1. 
+
+```{r}
+au_mig20_alt = tibble(age = 0:104) %>%
+  mutate(pasmr = rc_decomposition(age, rc_params),
+         pasmr = pasmr/sum(pasmr), 
+         asmr = pasmr * au_mean_pred) 
+
+  au_alt_grouped = au_mig20_alt %>%
+  mutate(age_group = rep(1:21, each=5))%>%
+  group_by(age_group) %>%
+  summarise(asmr = mean(asmr)) %>%
+  mutate(age_group = factor(age_group, labels = au_mig12$age))
+
+```
+
+
+
+
+```{r}
+au_alt_grouped %>%
+  knitr::kable(
+  booktabs = TRUE, digits = 2,
+  col.names = c("Age Grop", "ASMR"),
+  caption = "Rogers-Castro Model Age-spesific Migration Rates (ASMR) for Australia, 2020-2025", 
+)
+```
+
+```{r}
+au_mig20_alt %>%
+  ggplot(aes(x=age, y=asmr )) +
+  geom_line(color = "coral", size = 3) +
+  theme_bw(base_size = 15) + 
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Rogers-Castro Model Age-spesific Migration Rates (ASMR)",
+    subtitle = "Australia, 2020-2025",
+    x = "Age-spesific Migration Rate",
+    y = "Age" ) +
+  scale_x_continuous(n.breaks = 10) 
+```
+
+
+
+\newpage
+
+
+
+### _Q2.f_
+
+For this question, I created 50 different migration rate estimates for 2025 based on the AR(1) model _Q2.c_. Then, using the same age schedule from _Q2.e_, I created age-spesific migration rates for each sample. Here is the pseudo-equation: 
+
+$$ \text{ASMR}_{2025} = \text{TotalPop}_{2020} \times \text{NMR}_{2025} \times \text{PASMR}_{2012}$$
+$$\text{NMR}_{20205} = N(\mu = `r au_mean_pred`, \sigma = `r au_sd`)  $$
+
+```{r}
+
+# Question 2f -------------------------------------------------------------
+data("pop", package="wpp2019")
+au_pop20 = pop %>% filter(name == "Australia") %>% pull(`2020`)
+mig_est = rnorm(50,  mean = au_mean_pred, au_sd)
+# storing age categories as a sepearate variable
+age_cat = au_mig12$age
+pasmr = au_mig12 %>% select(age, pasmr)
+
+au_mig25 = 
+  tibble(sample = 1:50,
+       pop20 = au_pop20,
+       nmr25 = mig_est) %>%
+  mutate(mig25 = au_pop20 * mig_est) %>%
+  slice(rep(1:n(), each = 21)) %>%
+  mutate(age = rep_len(age_cat, length.out = n()), .after=sample) %>% 
+  left_join(pasmr, by = "age") %>%
+  mutate(mig_counts25 = mig25*pasmr)
+
+
+```
+
+
+```{r fig.asp=1.5, fig.width=7.5}
+ggplot(au_mig25, aes(x = mig_counts25)) +
+  geom_histogram() +
+  facet_wrap(vars(age), ncol = 3) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Projected Age-Specific Net Migration Numbers",
+    subtitle = "Australia, 2020-2025",
+    x = "Net number of migrants",
+    y = "Density"
+  )
+```
+
+\newpage 
+
+### _Q2.g_
+
+We will use the same code we used to generate population projections in _Q1_, except we will plug  our migration estimates into the `pop.predict` function. `pop.predict` function has a built-in function to disagregated total net migration into age-spesific migration by applying a Rogers-Castro schedule. Hence, we only need to plug the total migration estimates for 2025. 
+
+The challenge in this question is to transform our predicted trajectories into a format that `pop.predict` function understands. Here is the relevant section from the vignette:
+
+> migMtraj, migFtraj, migtraj
+Comma-delimited CSV file with male/female age-specific migration trajectories, or total migration trajectories (migtraj). If present, it replaces deterministic projections given by the mig* items. It has a similar format as e.g. e0M.file with columns “LocID”, “Year”, “Trajectory”, “Age” (except for migtraj) and “Migration”. For a five-year simulation, the “Age” column must have values “0-4”, “5-9”, “10-14”, ..., “95-99”, “100+”. In an annual simulation, age is given by a single number between 0 and 100.
+
+
+
+Australia Country Code: 36
+
+```{r}
+# Question 2g --------------------------------------------------------------
+out.dir = "../data/au_2025"
+mig.traj = "../data/mig_trajectories.csv"
+
+mig_out  = 
+  au_mig25 %>% 
+  mutate(LocID = "36", Period = "2020-2025", Year = "2023") %>%
+  #mutate(mig25 = mig25*1000) %>%
+  select(LocID, Year, Trajectory=sample, Migration=mig25) %>%
+  distinct(Trajectory, .keep_all = TRUE)
+
+
+#write_csv(mig_out,mig.traj)
+
+
+
+# # Run this once to get pop predictions
+# pop.pred <- pop.predict(
+#                end.year = 2100, start.year = 1950, present.year = 2020,
+#                wpp.year = 2019, output.dir = out.dir, nr.traj = 50,
+#                countries = "Australia",
+#                inputs = list(tfr.sim.dir = tfr.dir,
+#                              e0F.sim.dir = e0.dir,
+#                              e0M.sim.dir = "joint_",
+#                              migtraj = mig.traj),
+#                keep.vital.events = FALSE, replace.output=FALSE)
+
+au_pred_25 <- get.pop.prediction(out.dir)
+
+
+
+outM = bayesPop::pop.byage.table(au_pred_25, country = "Australia", 
+                                sex=c("male"), year = 2025)
+outF =  bayesPop::pop.byage.table(au_pred_25, country = "Australia", 
+                                sex=c("female"), year = 2025)
+
+
+
+tblM = outM %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "age") %>%
+  select(-`0.1`, -`0.9`) 
+
+
+tblF = outF %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "age") %>%
+  select(-`0.1`, -`0.9`)
+
+```
+
+\newpage 
+
+
+The following projections include estimated migration counts for 2025. This is for the male population by age:
+
+```{r}
+tblM %>%
+  knitr::kable(
+  booktabs = TRUE, digits = 2,
+  col.names = c("Age", "Median", "2.5% PI", "97.5 PI"),
+  caption = "Predicted MalePopulation for Australia, 2020-2025")
+```
+
+
+
+This is for the female population by age:
+
+```{r}
+tblF %>%  
+  knitr::kable(
+  booktabs = TRUE, digits = 2,
+  col.names = c("Age", "Median", "2.5% PI", "97.5 PI"),
+  caption = "Predicted Female Population for Australia, 2020-2025")
+
+
+```
+
+
+\newpage 
+
+# Appendix
+
+```{r getlabels, include=FALSE}
+labs <- knitr::all_labels()
+labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
+```
+
+```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
+```

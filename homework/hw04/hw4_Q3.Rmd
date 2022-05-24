@@ -1,0 +1,211 @@
+---
+title: "Homework 04"
+author: "Ihsan Kahveci"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    number_sections: true
+---
+
+\tableofcontents 
+\newpage 
+
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+# Load libraries
+library(tidyverse)
+library(forecast)
+
+# Data
+data("tfr", package = "wpp2019")
+
+tfr_all <- tfr %>%
+  select(-country_code, -last.observed) %>%
+  pivot_longer(
+    -name,
+    values_to = "tfr",
+    names_pattern = "^(.*)-",
+    names_to = "year") %>%
+  mutate(year = as.numeric(year))
+
+# Control randomness
+set.seed(57)
+
+```
+
+
+
+## _Q3_ 
+
+__Obtain the values of TFR for the Netherlands for 1950-2020 from the 2019 World Population Prospects.__
+
+```{r}
+
+# Question 3 --------------------------------------------------------------
+nld_tfr <- tfr_all %>% filter(name == "Netherlands") %>% select(-name)
+
+knitr::kable(
+  nld_tfr,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Period Start", "TFR"),
+  caption = "Total fertility rates, Netherlands, 1950-2020")
+
+```
+
+### _Q3.a_
+
+__Identify the period in which the Netherlands entered Phase III of the fertility model.__
+
+```{r}
+# Question 3a -------------------------------------------------------------
+
+nld_phase3_year <- nld_tfr %>%
+  arrange(year) %>%
+  filter(tfr < 2) %>%
+  mutate(
+    year_diff = lead(year) - year,
+    period_5 = year_diff == 5 & lag(year_diff) == 5,
+    two_increases = tfr > lag(tfr, 1) & tfr < lead(tfr, 1)
+  ) %>%
+  filter(period_5 & two_increases) %>%
+  slice(1) %>%
+  pull(year)
+
+```
+
+> "The countries that have entered Phase III are defined as the countries in which two subsequent five-year increases below a TFR of 2 children have been observed." (Alkema et al. 2011)
+
+Looking at TFR chart for the Netherlands, we see that Phase III starts with the period beginning
+in **`r nld_phase3_year`**.
+
+
+```{r}
+nld_tfr %>% 
+  mutate(phase = case_when(
+    year < 1960 ~ "Phase I",
+    year >= 1985 ~ "Phase III", 
+    TRUE ~ "Phase II")) %>%
+  ggplot(aes(year, tfr, color = phase, group = 1)) + 
+  geom_line(size = 1, alpha = 0.5) + 
+  geom_point(size = 2) + 
+  geom_hline(yintercept = 2, linetype = "dashed", size = 1) +
+  labs(title = "Total fertility rates, Netherlands, 1950-2020",
+       x = " ", y = "TFR") + 
+  scale_x_continuous(n.breaks=8) +
+  scale_y_continuous(n.breaks=6, limits = c(0, 4)) +
+  theme_bw(base_size = 15) +
+  theme(legend.title = element_blank(), 
+        legend.position = c(0.81, 0.8), 
+        legend.background = element_blank(),
+        legend.text = element_text(size=10))
+
+```
+
+
+\newpage 
+
+### _Q3.b_
+
+**Fit a (non-Bayesian) AR(1) model to the Phase III data, estimating the long-term mean, autoregressive parameter, and error variance.**
+
+
+
+
+```{r}
+# Question 3b -------------------------------------------------------------
+nld_ts <- nld_tfr %>%
+  filter(year >= nld_phase3_year) %>%
+  pull(tfr) %>%
+  ts()
+
+nld_model = arima(nld_ts, order=c(1,0,0))
+```
+
+
+I fit an order $1$ autoregressive model to the subset of Netherlands TFR
+data in Phase III, and extract some model parameters below.
+_Note that the AR(1) model was fit using the "mle" method._
+
+```{r, echo=FALSE}
+modelsummary::msummary(nld_model, 
+                       estimate = "{estimate} [{conf.low}, {conf.high}]", 
+                       statistic = NULL, fmt = 2, output = "kableExtra",
+                       caption = "Netherlands Phase III AR(1) model parameters")  %>%
+  kableExtra::kable_styling(latex_options = "hold_position")
+
+```
+
+
+
+\newpage 
+
+### _Q3.c_
+
+**Find the predictive distribution of Netherlands TFR for 2020-2025 conditional on this model, analytically or by simulation. Plot the distribution and give its median and a 95% prediction interval.**
+
+$$ (F_{t+1} - \mu) = \rho*(F_{t} - \mu) + \epsilon $$
+$$ \sigma^2 =\frac{ \sum^{N}_{i=1} (\hat{y_i} - y_i)^2 }{N} $$
+
+```{r}
+nld_tfr_last = nld_tfr$tfr[length(nld_tfr$tfr)]
+nld_sd = sqrt(nld_model$sigma2)
+nld_mean = nld_model$coef["intercept"]
+nld_ar1 = nld_model$coef["ar1"]
+nld_mean_pred = nld_ar1 * (nld_tfr_last - nld_mean) + nld_mean
+nld_pred_dist <- qnorm(seq(.001, .999, .001), mean = nld_mean_pred, sd = nld_sd)
+
+nld_pred_tbl <- tibble(
+  Mean = mean(nld_pred_dist),
+  Median = median(nld_pred_dist),
+  `2.5% PI` = Mean - 1.96 * nld_sd,
+  `97.5% PI` = Mean + 1.96 * nld_sd)
+```
+
+- $\sigma^2 = `r nld_model$sigma2`$  
+- $F_{2020} = `r nld_mean_pred`$ 
+
+```{r, echo=TRUE}
+knitr::kable(
+  nld_pred_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Predictive distribution of Netherlands TFR, 2020-2025") %>%
+  kableExtra::kable_styling(latex_options = "hold_position")
+
+```
+\newpage
+
+```{r, echo=FALSE}
+ggplot(tibble(nld_pred_dist), aes(x = nld_pred_dist)) +
+  geom_density(fill = "coral", alpha = .25) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predictive Distribution of TFR",
+    subtitle = "Netherlands, 2020-2025",
+    x = "Predicted TFR",
+    y = "Density"
+  )
+
+```
+
+
+
+

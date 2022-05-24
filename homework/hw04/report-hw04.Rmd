@@ -1,0 +1,432 @@
+---
+title: "Homework 04"
+author: "Ihsan Kahveci"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    number_sections: true
+---
+
+\tableofcontents 
+\newpage 
+
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+# Questions
+
+```{r prep, include=FALSE}
+
+# Prep work ---------------------------------------------------------------
+# Load libraries
+library(tidyverse)
+library(rethinking)
+library(bayesTFR)
+options(mc.cores = parallel::detectCores())
+
+# Data
+data("egsingle", package = "mlmRev")
+data("tfr", package = "wpp2019")
+tfr_sim_dir <- "TFR/sim01192018"
+
+tfr_all <- tfr %>%
+  select(-country_code, -last.observed) %>%
+  pivot_longer(
+    -name,
+    values_to = "tfr",
+    names_pattern = "^(.*)-",
+    names_to = "year") %>%
+  mutate(year = as.numeric(year))
+
+# Control randomness
+set.seed(57)
+
+```
+
+## _Q1_
+
+```{r}
+
+# Question 1 --------------------------------------------------------------
+
+edu_data <- egsingle %>%
+  filter(year == .5) %>%
+  select(childid, schoolid, math) 
+
+```
+
+
+
+### _Q1.a_
+
+For a student $i$ in school $j$, our Bayesian random effects one-way analysis
+of variance model is written as:
+
+$$
+\begin{aligned}
+y_i &= \alpha_{j[i]} + \epsilon_i, \\
+\epsilon_i &\stackrel{iid}{\sim} N(0, \sigma_y^2), \\
+\alpha_j   &\stackrel{iid}{\sim} N(\mu_\alpha, \sigma_\alpha^2)
+\end{aligned}
+$$
+
+where the standard deviation of error in estimating individual student
+performance ($\sigma_y$), the mean performance across all schools
+($\mu_\alpha$), and the standard deviation in performance across all schools
+($\sigma_\alpha$) are the unknown parameters to be estimated.
+
+### _Q1.b_
+
+For this scenario, I used uninformative priors because there is no a priori information about the schools or students:
+
+$$
+\begin{aligned}
+\mu_\alpha    &\sim N(0, 0.0001) \\
+\sigma_\alpha &\sim \text{Uniform}(0, 1) \\
+\sigma_y      &\sim \text{Uniform}(0, 1)
+\end{aligned}
+$$
+
+### _Q1.c_
+
+```{r, warning=FALSE, message=FALSE}
+# Question 1c -------------------------------------------------------------
+
+dat <- list(
+  math = edu_data$math,
+  student = edu_data$childid,
+  school = edu_data$schoolid)
+
+m1 = ulam(
+  alist(
+    y ~ dnorm(alpha_j, sig_y),
+    alpha_j ~ dnorm(mu_alpha, sig_alpha),
+    # Priors
+    mu_alpha ~ dnorm(0, 0.0001),
+    sig_alpha ~ uniform(0, 1),
+    sig_y ~ uniform(0, 1)
+    ), data=dat, chains=4)
+```
+
+
+### _Q1.d_
+
+```{r}
+traceplot(m1)
+trankplot(m1)
+```
+The model is converged in 1000 iterations.
+
+### _Q1.e_
+
+```{r}
+out = rethinking::precis(m1, depth = 2)  
+names = rownames(out)
+
+summary = bind_cols(vars = names, as_tibble(out))
+
+knitr::kable(
+  summary,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Predictive distribution sumeduy of Netherlands TFR, 2020-2025"
+)
+```
+
+
+```{r}
+pairs(m1)
+```
+
+This model was fit using STAN which uses Hamiltonian Monte Carlo algorithm.
+
+
+## _Q2_
+
+```{r}
+
+# Question 2 --------------------------------------------------------------
+
+peru_tfr <- tfr_all %>% filter(name == "Peru") %>% select(-name)
+
+```
+
+
+### _Q2.a_ & _b_
+
+Using Adrian's demo example:
+
+```{r}
+# Question 2a -------------------------------------------------------------
+tfr  <- peru_tfr$tfr
+
+dl <- function (x, d, a1, a2, a3, a4) {
+  d / (1+exp (-(x-a2)/a1)) - d / (1+exp(-(x-a4)/a3)) }
+
+par (mfrow=c(1,2), lwd=2)
+
+d <- 1
+a4 <- 6
+a3 <- 0.5
+a2 <- 2
+a1 <- 0.5
+g <- dl(tfr,d,a1,a2,a3,a4)
+
+plot (tfr, g, type="line", xlim=rev(c(0,9)), col="blue")
+plot (tfr, g, type="p", xlim=rev(c(0,9)), col="green")
+
+```
+
+The plots shows a great fit. As expected, the third phase region of the plot is blank because Peru has not reached Phase 3 yet.
+
+### _Q2.c_
+
+
+## _Q3_
+
+```{r}
+
+# Question 3 --------------------------------------------------------------
+
+nld_tfr <- tfr_all %>% filter(name == "Netherlands") %>% select(-name)
+
+```
+
+### _Q3.a_
+
+```{r}
+
+# Question 3a -------------------------------------------------------------
+
+nld_phase3_year <- nld_tfr %>%
+  arrange(year) %>%
+  filter(tfr < 2) %>%
+  mutate(
+    year_diff = lead(year) - year,
+    period_5 = year_diff == 5 & lag(year_diff) == 5,
+    two_increases = tfr > lag(tfr, 1) & tfr < lead(tfr, 1)
+  ) %>%
+  filter(period_5 & two_increases) %>%
+  slice(1) %>%
+  pull(year)
+
+```
+
+```{r}
+knitr::kable(
+  nld_tfr,
+  booktabs = TRUE,
+  digits = 3,
+  col.names = c("Period Start", "TFR"),
+  caption = "Total fertility rates, Netherlands, 1950-2020"
+)
+```
+
+The start of Phase III of the fertility model is defined by two consecutive
+five-year increases of TFR while staying below a TFR of 2. Looking at TFR data
+for the Netherlands, we see that Phase III starts with the period beginning
+in **`r nld_phase3_year`**.
+
+### _Q3.b_
+
+```{r}
+
+# Question 3b -------------------------------------------------------------
+
+nld_ts <- nld_tfr %>%
+  filter(year >= nld_phase3_year) %>%
+  pull(tfr) %>%
+  ts(start = 1985, end=2015, frequency = 1)
+
+nld_model = arima(nld_ts, order=c(1,0,0))
+
+
+```
+
+
+
+
+I fit an order $1$ autoregressive model to the subset of Netherlands TFR
+data in Phase III, and extract some model parameters below.
+_Note that the AR(1) model was fit using the "mle" method._
+
+```{r}
+knitr::kable(
+  broom::tidy(nld_model),
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Netherlands Phase III AR(1) model parameters"
+)
+```
+
+### _Q3.c_
+
+```{r}
+nld_sd = sqrt(nld_model$sigma2)
+nld_mean = nld_model$coef[2]
+nld_pred_dist <- qnorm(seq(.001, .999, .001), mean = nld_mean, sd = nld_sd)
+
+nld_pred_tbl <- tibble(
+  Mean = mean(nld_pred_dist),
+  Median = median(nld_pred_dist),
+  `2.5% PI` = Mean - 1.96 * nld_sd,
+  `97.5% PI` = Mean + 1.96 * nld_sd)
+```
+
+
+```{r}
+knitr::kable(
+  nld_pred_tbl,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "Predictive distribution sumeduy of Netherlands TFR, 2020-2025"
+)
+
+```
+
+
+```{r}
+ggplot(tibble(nld_pred_dist), aes(x = nld_pred_dist)) +
+  geom_density(fill = "coral", alpha = .25) +
+  theme_bw() +
+  theme(text = element_text(family = "serif")) +
+  labs(
+    title = "Predictive Distribution of TFR",
+    subtitle = "Netherlands, 2020-2025",
+    x = "Predicted TFR",
+    y = "Density"
+  )
+
+```
+
+
+## _Q4_
+
+```{r}
+
+# Question 4 --------------------------------------------------------------
+
+tfr_peru_ecu <- tfr_all %>%
+  filter(name %in% c("Peru", "Ecuador")) %>%
+  pivot_wider(names_from = name, values_from = "tfr") %>%
+  rename(`Period Start` = year)
+
+```
+
+### _Q4.a_
+
+```{r}
+
+# Question 4.a ------------------------------------------------------------
+
+tfr_phase2_mcmc  <- get.tfr.mcmc(tfr_sim_dir)
+tfr_phase3_mcmc <- get.tfr3.mcmc(tfr_sim_dir)
+tfr_pred  <- get.tfr.prediction(tfr_sim_dir)
+
+```
+
+The fully converged simulation is loaded using the `README` file contained with
+the data.
+
+### _Q4.b_
+
+```{r}
+
+# Question 4.b ------------------------------------------------------------
+
+DLcurve.plot(
+  tfr_phase2_mcmc,
+  country = "Peru",
+  nr.curves = 50,
+  pi = 95
+)
+
+DLcurve.plot(
+  tfr_phase2_mcmc,
+  country = "Ecuador",
+  nr.curves = 50,
+  pi = 95
+)
+
+```
+
+From the above graphs comparing the Phase II double logistic models for
+Peru and Ecuador, we see that the TFR decrements maintains higher values
+across TFR in Peru for both the median and 95% PI, suggesting that
+fertility is declining faster in Peru than Ecuador We can also observe
+this trend by looking directly at the TFR for both countries over time:
+
+```{r}
+knitr::kable(
+  tfr_peru_ecu,
+  booktabs = TRUE,
+  digits = 3,
+  caption = "TFR over time"
+)
+```
+
+
+### _Q4.c_
+
+```{r}
+
+# Question 4c -------------------------------------------------------------
+
+tfr_traj_peru <- get.tfr.trajectories(tfr_pred, country = "Peru")[-(1:2), ]
+tfr_traj_ecu <- get.tfr.trajectories(tfr_pred, country = "Ecuador")[-(1:2), ]
+
+prob_tfr_peru_higher <- rowMeans(tfr_traj_peru > tfr_traj_ecu)
+
+prob_tfr_peru_higher_tbl <- tibble(
+  period_start = as.integer(names(prob_tfr_peru_higher)) - 3,
+  prob_peru_higher = prob_tfr_peru_higher
+)
+
+prob_tfr_peru_higher_all <-
+  sum(apply(tfr_traj_peru > tfr_traj_ecu, 2, all)) / ncol(tfr_traj_peru)
+
+```
+
+By getting the TFR trajectories for Peru and Ecuador, we can find the
+posterior predictive probability for many conditions.
+
+First, we can determine the probability of Peru having a higher TFR than
+Ecuador in each five-year period from 2020 through 2095 by finding the mean
+number of times Peru has a higher TFR than Ecuador across all simulations:
+
+```{r}
+knitr::kable(
+  prob_tfr_peru_higher_tbl,
+  booktabs = "TRUE",
+  digits = 3,
+  col.names = c("Period Start", "Pr(peru > edu)")
+)
+```
+
+We can also find the probability that the TFR of Peru will be higher than that
+of Ecuador in all five-year periods from 2020 through 2095 by finding the
+mean number of simulations where Peru has a higher TFR than Ecuador for all
+periods. This value is calculated to be
+**`r round(prob_tfr_peru_higher_all, 3)`**.
+
+
+# Appendix
+
+```{r getlabels, include=FALSE}
+labs <- knitr::all_labels()
+labs <- labs[!labs %in% c("setup", "toc", "getlabels", "allcode")]
+```
+
+```{r allcode, ref.label=labs, eval=FALSE, echo=TRUE}
+```
