@@ -2,7 +2,7 @@
 
 Attention to the differences between period measures and cohort measures of fertility is required in the interpretation of fertility measures derived from period data. Whether period or cohort age-standardized fertility rates are more appropriate is not a measurement issue but it depends on the relative importance of period and cohort influences on fertility. There is no consensus on this conceptual issue in demography (Bhrolchain, 1992) 
 
-A cohort's total fertility rate can be readily estimated through a census or survey question about parity, the number of live births a woman has had. The mean parity, or mean number of children ever born, of a cohort of women who have completed childbearing, is equal to teh cohort's total fertility rate if reporting is accurate and if there are no differentials in mortality or migration by parity.
+A cohort's total fertility rate can be readily estimated through a census or survey question about parity, the number of live births a woman has had. The mean parity, or mean number of children ever born, of a cohort of women who have completed childbearing, is equal to the cohort's total fertility rate if reporting is accurate and if there are no differentials in mortality or migration by parity.
 
 The fertility process can be represented not only through a woman's movement from one age to the next but also by her movement from one parity to the next. This latter movement can be represented by parity progression ratios, introduced by Henry (1953:22). A woman's parity is the number of her live births, so the parity progression ratio from parity $i$ to parity $i+1$ is the proportion of a cohort who had at least $i$ live births who went on to have at least one more: 
 

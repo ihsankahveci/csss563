@@ -25,7 +25,7 @@ m6 = lm(ccf50 ~ lag(ccf50) + ns(edu, df = 4, knots = edu_knots) + mn, data)
 
 
 modelsummary(list(m1,m2,m3,m4,m5, m6), statistic = NULL, fmt = 2,
-             estimate = "{p.value} [{conf.low}, {conf.high}]")
+             estimate = "{estimate} [{conf.low}, {conf.high}]")
 
 model = m5
 

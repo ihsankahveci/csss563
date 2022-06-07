@@ -1,0 +1,198 @@
+---
+title: "Homework 04"
+author: "Ihsan Kahveci"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    highlight: tango
+    df_print: kable
+    fig_caption: yes
+    number_sections: true
+---
+
+```{=tex}
+\tableofcontents 
+\newpage
+```
+```{r setup, include=FALSE}
+
+gr <- 2 / (1 + sqrt(5))
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, fig.asp = gr)
+options(knitr.kable.NA = '-')
+
+rm(gr)
+```
+
+```{r prep, include=FALSE}
+# Prep work ---------------------------------------------------------------
+# Load libraries
+library(forecast)
+library(nlme)
+library(splines)
+library(tidyverse)
+library(modelsummary)
+
+# Control randomness
+set.seed(57)
+options(scipen = 999)
+
+
+# Data
+data = readRDS("data/cov_projections.RDS")
+train = data %>% filter(pred == 0)
+test = data %>% filter(pred == 1) %>% select(-tfr, -ccf50)
+                                             
+```
+
+```{r}
+
+train %>%
+  filter(country == "Canada") %>%
+  select(year, edu, mn, tfr, ccf50) %>%
+  knitr::kable(
+    booktabs = TRUE,
+    digits = 2,
+    col.names = c("Year", "Education", "Met-need", "TFR", "CCF50"),
+    caption = "Cohort Fertility and Covariates, Canada 2018-2022") %>%
+  kableExtra::kable_styling(latex_options = "hold_position")
+```
+
+```{r}
+train$country %>% unique() %>% sort %>% cat(sep = ", ")
+```
+
+\newpage
+
+### *Q3.b*
+
+**Fit a (non-Bayesian) AR(1) model to the Phase III data, estimating the
+long-term mean, autoregressive parameter, and error variance.**
+
+I fit an order $1$ autoregressive model to the subset of Netherlands TFR
+data in Phase III, and extract some model parameters below. *Note that
+the AR(1) model was fit using the "mle" method.*
+
+```{r, echo=FALSE}
+m1 <- nlme::lme(# A formula object including the response,
+  # the fixed covariates, and any grouping variables
+  data = train, 
+  fixed = ccf50 ~ mn + edu,
+  # The random effects component
+  random = ~ 1 | country,
+  # The TS dynamics: specify the time & group variables,
+  # and the order of the ARMA(p,q) process
+  correlation = corARMA(form = ~ year | country,
+                        p = 1,  # AR(p) order
+                        q = 0   # MA(q) order
+  ) 
+)
+
+
+m2 <- nlme::lme(# A formula object including the response,
+  # the fixed covariates, and any grouping variables
+  data = train, 
+  fixed = ccf50 ~ 1 + mn + ns(edu),
+  # The random effects component
+  random = ~ 1 | country,
+  control = lmeControl(maxIter = 1000, msMaxIter = 1000),
+  # The TS dynamics: specify the time & group variables,
+  # and the order of the ARMA(p,q) process
+  correlation = corARMA(form = ~ year | country,
+                        p = 1,  # AR(p) order
+                        q = 5   # MA(q) order
+  ) 
+)
+
+m3 <- nlme::lme(# A formula object including the response,
+  # the fixed covariates, and any grouping variables
+  data = train, 
+  fixed = ccf50 ~1,
+  # The random effects component
+  random = ~ 1 | country,
+  # The TS dynamics: specify the time & group variables,
+  # and the order of the ARMA(p,q) process
+  correlation = corARMA(form = ~ year | country,
+                        p = 1,  # AR(p) order
+                        q = 0   # MA(q) order
+  ) 
+)
+
+ 
+
+lme_models = list(m1, m2, m3)
+```
+
+```{r}
+ACF(m2) %>% plot()
+```
+
+```{r}
+summary(m2)
+```
+
+```{r}
+my_country = "Canada"
+can = train %>% filter(country == my_country) %>% arrange(year)
+can$ccf50
+can_ts = ts(can$ccf50)
+can_reg = can %>% select(mn, edu) %>% as.matrix()
+can_new = test %>% filter(country == my_country) %>% arrange(year) %>% select(mn, edu) %>% as.matrix()
+
+fit = forecast::Arima(can_ts, order = c(1, 0, 0))
+summary(fit)
+
+pred = forecast::forecast(fit, 12, xreg = can_new)
+plot(pred)
+```
+
+```{r}
+plot(can$year, can$ccf50, type="l")
+```
+
+```{r}
+modelsummary(lme_models, statistic = NULL, fmt = 2,
+             estimate = "[{conf.low}, {conf.high}]")
+```
+
+```{r}
+# BEST MODEL ccf50 ~ mn + ns(edu)
+
+model = m2
+test$ccf50 = predict(model, newdata = test)
+
+final = bind_rows(train, test)
+  
+final %>% 
+  ggplot(aes(x=year, y=ccf50, linetype = pred)) +
+  geom_line() + 
+  facet_wrap(~country) + 
+  theme_bw()
+
+```
+
+```{r}
+
+```
+
+\newpage
+
+### 
+
+$$ (F_{t+1} - \mu) = \rho*(F_{t} - \mu) + \epsilon $$
+$$ \sigma^2 =\frac{ \sum^{N}_{i=1} (\hat{y_i} - y_i)^2 }{N} $$
+
+-   $\sigma^2 = `r nld_model$sigma2\`\$\
+-   $F_{2020} = `r nld_mean_pred`$
+
+\newpage
+
+| Variable                        | Observed (1982-2018)          | Projected (2019-2030)         |
+|-------------------------|-------------------------|-----------------------|
+| Complete Cohort Fertility at 50 | Human Fertility Database      | Human Fertility Database      |
+| Total Fertility Rate            | Global Burden of Disease 2019 | Global Burden of Disease 2019 |
+| Contraceptive Met-need          | Global Burden of Disease 2019 | United Nations                |
+| Educational Attaintment         | Global Burden of Disease 2019 | Wittgenstein Center           |
+
+: Data sources used in this paper.

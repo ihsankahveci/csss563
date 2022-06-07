@@ -29,8 +29,11 @@ my_countries = countries %>%
     destination = "country.name",
     custom_match = c(
       "GBRTENW" = "United Kingdom",
-      "GBR_SCO" = "Scotland",
-      "FRATNP" = "France")))
+      "FRATNP" = "France",
+      "USA" = "United States of America"))) %>%
+  drop_na()
+
+saveRDS(my_countries, "data/countries.RDS")
 
 ccfr = ccfr_raw %>%
   rename_all(tolower) %>%
@@ -44,8 +47,6 @@ ccfr = ccfr_raw %>%
   
 combined = tfr_raw %>%
   select(country = location_name, year = year_id, tfr=val) %>%
-  mutate(country = ifelse(
-    country == "United States of America", "United States", country)) %>%
   right_join(ccfr, by = c("country", "year"))
 
 #####
@@ -54,14 +55,10 @@ edu_raw = read_csv("data/IHME_GBD_2019_COVARIATES/IHME_GBD_2019_COV_1980_2019_MA
 mn_raw = read_csv("data/IHME_GBD_2019_COVARIATES/IHME_GBD_2019_COV_1980_2019_CONTRA_DEMAND_SATISFIED_Y2020M07D31.CSV")
 
 edu = edu_raw %>%
-  select(country = location_name, year = year_id, edu = val) %>%
-  mutate(country = ifelse(
-    country == "United States of America", "United States", country))
+  select(country = location_name, year = year_id, edu = val)
 
 mn = mn_raw %>%
-  select(country = location_name, year = year_id, mn = val) %>%
-  mutate(country = ifelse(
-    country == "United States of America", "United States", country)) 
+  select(country = location_name, year = year_id, mn = val) 
 
 final = combined %>% 
   left_join(edu, by = c("country", "year")) %>% 

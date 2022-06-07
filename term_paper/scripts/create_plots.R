@@ -2,6 +2,7 @@ library(tidyverse)
 
 # READ DATA
 data = readRDS("data/final.RDS")
+projections = readRDS("data/cov_projections.RDS")
 
 # PLOT FERTILITY 
 fertility_long = data %>%
@@ -55,5 +56,40 @@ covariates_plot = covariates_long %>%
 
 ggsave(plot = covariates_plot, "plots/covariates_all.png", width = 7, height = 7)
 
+# PLOT MET NEED PROJECTIONS
+metneed_plot = projections %>% 
+  select(country, year, pred, IHME = mn, UN = un_mn) %>%
+  mutate(UN = UN/100) %>%
+  pivot_longer(c(IHME, UN)) %>%
+  ggplot(aes(x=year, y=value, color = name, linetype = pred)) + 
+  geom_line() + 
+  facet_wrap(~country) +
+  guides(linetype = "none",
+         color = guide_legend(title = NULL)) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() + 
+  theme(legend.position = c(0.85, 0.15),
+        legend.key.height = unit(1, "cm")) +
+  labs(x = NULL, y = NULL,
+       title = "Contraceptive Met-need Projections 2018-2030") 
+
+ggsave(plot = metneed_plot, "plots/contraceptive_projections.png", width = 7, height = 7)
+
+# PLOT EDU PROJECTIONS
+education_plot = projections %>% 
+  select(country, year, pred, IHME = edu, WCDE = wcde_edu) %>%
+  pivot_longer(c(IHME, WCDE)) %>%
+  ggplot(aes(x=year, y=value, color = name, linetype = pred)) + 
+  geom_line() + 
+  facet_wrap(~country) +
+  guides(linetype = "none",
+         color = guide_legend(title = NULL)) +
+  theme_bw() + 
+  theme(legend.position = c(0.85, 0.15),
+        legend.key.height = unit(1, "cm")) +
+  labs(x = NULL, y = NULL,
+       title = "Years of Education at 25, Females, 2018-2030")
+
+ggsave(plot = education_plot, "plots/education_projections.png", width = 7, height = 7)
 
 
