@@ -27,17 +27,12 @@ model_edu = lm(edu ~ wcde_edu + country, train)
 summary(model_edu)
 test$edu = predict(model_edu, newdata = test)
 
-
 projections = bind_rows(test, train) %>% 
   mutate(pred = factor(ifelse(year > 2018, 1, 0)))
 
 saveRDS(projections, "data/cov_projections.RDS")
   
-  
-  
-  
 
-       
   
 
 
