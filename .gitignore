@@ -6,7 +6,7 @@ lectures/*.pdf
 demos/
 homework/hw*/data/
 homework/data/
-term_paper/data/raw/
+term_paper/data/raw_data/
 
 # Created by https://www.gitignore.io/api/r
 # Edit at https://www.gitignore.io/?templates=r
